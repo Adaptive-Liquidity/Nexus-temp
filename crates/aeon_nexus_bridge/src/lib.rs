@@ -12,6 +12,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+/// RecallEnvelopeV2 — the replay-resistant recall attestation contract (S0.1).
+///
+/// Strictly additive. Nothing below this line changed when V2 landed: the V1
+/// records remain byte-identical on the wire, are not deprecated, and have no
+/// conversion path to or from V2 in either direction.
+pub mod v2;
+
 type HmacSha256 = Hmac<Sha256>;
 
 pub const SHA256_ALGORITHM: &str = "sha256";
