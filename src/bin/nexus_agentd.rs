@@ -1238,6 +1238,38 @@ mod profile_auth_tests {
             .expect("debug build wrapper must not refuse a tokenless start");
     }
 
+    /// Release counterpart, and the assertion that actually covers shipped behaviour:
+    /// under `cargo test --release` the wrapper must REFUSE a tokenless start. Only that
+    /// profile compiles the strict `#[cfg(not(debug_assertions))]` arm, so without this
+    /// test the security-sensitive wiring is never exercised as it is built for release.
+    /// Driven in CI by the `release-auth-gate` job.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn wrapper_refuses_tokenless_start_in_release_test_build() {
+        let token: AuthToken = None;
+        let err = enforce_release_auth_requirement(&token)
+            .expect_err("release build wrapper must refuse a tokenless start");
+        let msg = err.to_string();
+        assert!(
+            msg.contains(AUTH_TOKEN_ENV),
+            "refusal must name the env var to set, got: {msg}"
+        );
+        assert!(
+            msg.contains("refuse to start"),
+            "refusal must state that startup was refused, got: {msg}"
+        );
+    }
+
+    /// The release wrapper must still start when a token IS configured — otherwise a
+    /// fail-closed gate would be indistinguishable from a daemon that never starts.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn wrapper_accepts_configured_token_in_release_test_build() {
+        let token: AuthToken = Some(Arc::from("supersecret"));
+        enforce_release_auth_requirement(&token)
+            .expect("release build wrapper must accept a configured auth token");
+    }
+
     /// The compile-time gate must not read `NEXUS_AGENTD_RELEASE` — that variable drives
     /// the separate runtime gate in `enforce_profile_auth_requirement`. Conflating them
     /// would make the shipped fail-closed posture env-overridable.
