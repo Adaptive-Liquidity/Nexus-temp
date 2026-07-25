@@ -15,7 +15,7 @@
 //! Reproduced at 12/20 runs under default test parallelism, 0/5 single-threaded.
 
 use std::ffi::OsString;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 /// The single mutex governing [`EGRESS_ENV_VARS`] for the whole crate's tests.
 ///
@@ -26,6 +26,44 @@ pub(crate) static EGRESS_ENV_LOCK: Mutex<()> = Mutex::new(());
 /// The process-global variables read by `EgressPolicy::from_env`.
 pub(crate) const EGRESS_ENV_VARS: [&str; 2] =
     ["NEXUS_EGRESS_ALLOWLIST", "NEXUS_EGRESS_ALLOW_PRIVATE"];
+
+/// Proof that the current thread holds [`EGRESS_ENV_LOCK`], by owning the real
+/// `MutexGuard`.
+///
+/// This is deliberately **not** a zero-sized marker. A marker could be constructed by
+/// any crate-internal code that merely claims to hold the lock, which makes the
+/// obligation a convention. Owning the `MutexGuard` makes it a fact: the only way to
+/// obtain one of these is to actually acquire the mutex, so a function taking
+/// `&EgressEnvGuard<'_>` cannot be called without the lock being held.
+pub(crate) struct EgressEnvGuard<'a> {
+    _guard: MutexGuard<'a, ()>,
+}
+
+impl EgressEnvGuard<'static> {
+    /// Acquire the crate-wide egress lock, recovering from poisoning.
+    ///
+    /// A test that panics while holding this lock poisons it; that is expected and
+    /// non-fatal, so every acquisition recovers via `into_inner`.
+    pub(crate) fn acquire() -> Self {
+        Self {
+            _guard: EGRESS_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        }
+    }
+}
+
+/// Hold [`EGRESS_ENV_LOCK`] for the duration of `f`, **without** clearing the
+/// environment.
+///
+/// Serialisation alone is sufficient for readers: an invalid value only ever exists
+/// while a writer holds this lock, so a reader that holds it cannot observe one.
+/// Deliberately not clearing means a test that intentionally configures an allowlist
+/// before constructing a client still sees its own configuration.
+pub(crate) fn with_egress_lock<R>(f: impl FnOnce(&EgressEnvGuard<'_>) -> R) -> R {
+    let held = EgressEnvGuard::acquire();
+    f(&held)
+}
 
 /// RAII restoration guard: puts [`EGRESS_ENV_VARS`] back to their captured values when
 /// dropped, including while unwinding from a panic.
@@ -166,5 +204,115 @@ mod tests {
                 std::env::remove_var(name);
             }
         }
+    }
+
+    /// Deterministic proof that the choke point serialises a reader against a writer
+    /// holding an invalid egress value — the exact TEST-1 race, driven by channel
+    /// handshakes rather than sleeps.
+    ///
+    /// What this proves deterministically: the reader never observes the invalid value
+    /// (construction would panic on `ConfigError` if it did), and it completes only
+    /// after the writer releases. What it cannot prove without a bounded wait is the
+    /// instantaneous claim "the reader is blocked *right now*" — that is a negative
+    /// about a blocking mutex, so the `recv_timeout` below is an observation, not a
+    /// proof, and it is deliberately not the assertion the test rests on.
+    fn choke_point_serialises_reader(
+        construct: fn() -> (),
+    ) -> (bool, std::sync::mpsc::Receiver<()>) {
+        use std::sync::mpsc;
+        use std::thread;
+
+        let (reader_started_tx, reader_started_rx) = mpsc::channel::<()>();
+        let (reader_done_tx, reader_done_rx) = mpsc::channel::<()>();
+        let (writer_may_release_tx, writer_may_release_rx) = mpsc::channel::<()>();
+
+        let writer = thread::spawn(move || {
+            with_clean_egress_env(|| {
+                // Invalid value is live for as long as this closure holds the lock.
+                std::env::set_var(EGRESS_ENV_VARS[1], "not-a-bool");
+                // Hand control to the test body, which starts the reader.
+                writer_may_release_rx
+                    .recv()
+                    .expect("test body must signal release");
+            });
+        });
+
+        let reader = thread::spawn(move || {
+            reader_started_tx.send(()).expect("signal reader start");
+            // Blocks until the writer releases; must never observe "not-a-bool".
+            construct();
+            reader_done_tx.send(()).expect("signal reader done");
+        });
+
+        reader_started_rx.recv().expect("reader must start");
+        // Observation (not the load-bearing assertion): the reader should still be
+        // blocked while the writer holds the lock.
+        let blocked_while_writer_held = reader_done_rx
+            .recv_timeout(std::time::Duration::from_millis(150))
+            .is_err();
+
+        writer_may_release_tx.send(()).expect("release writer");
+        writer.join().expect("writer thread");
+        reader.join().expect("reader thread");
+
+        (blocked_while_writer_held, reader_done_rx)
+    }
+
+    #[test]
+    fn memory_client_responder_is_serialised_against_invalid_egress_writer() {
+        let (blocked, _rx) = choke_point_serialises_reader(|| {
+            let _ = crate::aeon::AeonMemoryClient::with_test_responder(
+                &crate::aeon::AeonConfig {
+                    enabled: true,
+                    base_url: "http://aeon.test".to_string(),
+                    agent_id: "agent-1".to_string(),
+                    session_id: None,
+                    timeout_ms: 30_000,
+                    management_key: Some("mgmt-key".to_string()),
+                    hmac_key: None,
+                    verifying_key: None,
+                },
+                std::sync::Arc::new(|_req| crate::aeon::TestHttpResponse {
+                    status: 200,
+                    body: "{}".to_string(),
+                }),
+            );
+        });
+        // Reaching here at all means construction succeeded: had the reader observed
+        // "not-a-bool", `from_config` would have returned ConfigError and the
+        // `.expect()` inside the constructor would have panicked in the reader thread,
+        // failing the join above.
+        assert!(
+            blocked,
+            "reader completed while the writer still held the lock — the choke point \
+             did not serialise construction"
+        );
+    }
+
+    #[test]
+    fn timeline_sink_responder_is_serialised_against_invalid_egress_writer() {
+        let (blocked, _rx) = choke_point_serialises_reader(|| {
+            let _ = crate::aeon::AeonTimelineSink::with_test_responder(
+                &crate::aeon::AeonConfig {
+                    enabled: true,
+                    base_url: "http://aeon.test".to_string(),
+                    agent_id: "agent-1".to_string(),
+                    session_id: None,
+                    timeout_ms: 30_000,
+                    management_key: Some("mgmt-key".to_string()),
+                    hmac_key: None,
+                    verifying_key: None,
+                },
+                std::sync::Arc::new(|_req| crate::aeon::TestHttpResponse {
+                    status: 200,
+                    body: "{}".to_string(),
+                }),
+            );
+        });
+        assert!(
+            blocked,
+            "reader completed while the writer still held the lock — the choke point \
+             did not serialise construction"
+        );
     }
 }
