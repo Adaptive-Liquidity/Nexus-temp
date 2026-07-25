@@ -136,6 +136,114 @@ jobs:
       - name: cargo clippy --features aeon-memory
         run: cargo clippy --features aeon-memory --locked -- -D warnings
 
+  # Stage 0.0a items #2 and #3: every feature flag shipped in a release must be
+  # built and tested in CI. Before this job, "mcp-http" and
+  # "tenant-registry-postgres" appeared nowhere in .github/ — roughly 2,200
+  # lines of HTTP transport, per-tenant auth, rate limiting and registry code,
+  # plus their own tests, were never compiled, linted or run.
+  #
+  # "mcp-http" is tested on its own as well as with aeon-memory: the two differ
+  # in which items are reachable, and a registry-only helper left on the bare
+  # mcp-http gate is exactly the dead-code regression this matrix is here to
+  # catch.
+  mcp-http-tests:
+    name: mcp-http (${{ matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - "mcp-http"
+          - "mcp-http aeon-memory"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable branch as of 2026-06-16
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: cargo clippy --features "${{ matrix.features }}"
+        run: cargo clippy --all-targets --features "${{ matrix.features }}" --locked -- -D warnings
+      - name: cargo test --features "${{ matrix.features }}"
+        run: cargo test --all-targets --features "${{ matrix.features }}" --locked
+
+  # The registry test talks to a real PostgreSQL instance. It used to be
+  # unrunnable: the test env guard clears NEXUS_MCP_TENANT_DB_URL, and the test
+  # read the variable after the guard had deleted it, so a bare `return` always
+  # fired and the test reported success while touching no database at all.
+  #
+  # NEXUS_MCP_REQUIRE_POSTGRES_TESTS=1 turns any skip into a failure, and the
+  # assertions below fail the job if the test does not visibly execute — so a
+  # green result here cannot mean "tested nothing".
+  tenant-registry-postgres-tests:
+    name: tenant-registry-postgres (live database)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # postgres:16-alpine, pinned by digest to match this repo's
+        # SHA-pinned-actions convention.
+        image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_USER: nexus_ci
+          POSTGRES_PASSWORD: nexus_ci
+          POSTGRES_DB: nexus_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexus_ci -d nexus_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      NEXUS_MCP_TENANT_DB_URL: postgres://nexus_ci:nexus_ci@127.0.0.1:5432/nexus_ci
+      NEXUS_MCP_REQUIRE_POSTGRES_TESTS: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable branch as of 2026-06-16
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: cargo clippy --features "mcp-http aeon-memory tenant-registry-postgres"
+        run: |
+          cargo clippy --all-targets \
+            --features "mcp-http aeon-memory tenant-registry-postgres" \
+            --locked -- -D warnings
+
+      - name: cargo test --features "mcp-http aeon-memory tenant-registry-postgres"
+        run: |
+          cargo test --all-targets \
+            --features "mcp-http aeon-memory tenant-registry-postgres" \
+            --locked
+
+      # Run the database test on its own so its output cannot interleave with
+      # other tests, then assert it really executed. NEXUS_MCP_REQUIRE_POSTGRES_TESTS
+      # already turns a skip into a panic; this is the belt-and-braces check that
+      # the job cannot go green while the registry code goes untouched.
+      - name: registry test must have executed against the database
+        run: |
+          set -euo pipefail
+          cargo test \
+            --features "mcp-http aeon-memory tenant-registry-postgres" \
+            --locked --bin nexus-mcp \
+            tests::postgres_tenant_snapshot_loads_active_rows_from_db_table \
+            -- --exact --nocapture 2>&1 | tee /tmp/tenant-registry-test.log
+
+          log=/tmp/tenant-registry-test.log
+
+          if grep -q '^SKIP: postgres tenant-registry' "$log"; then
+            echo "::error::The PostgreSQL tenant-registry test skipped even though NEXUS_MCP_REQUIRE_POSTGRES_TESTS=1"
+            exit 1
+          fi
+
+          if ! grep -q 'test result: ok\. 1 passed' "$log"; then
+            echo "::error::postgres_tenant_snapshot_loads_active_rows_from_db_table did not run — the registry code is not actually covered"
+            exit 1
+          fi
+
+          echo "Confirmed: the tenant-registry test executed against the live database."
+
   dockerfile-lint:
     name: publish Dockerfile sanity check
     runs-on: ubuntu-latest
