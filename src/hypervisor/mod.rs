@@ -2193,8 +2193,8 @@ fn is_hex_digest(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "aeon-memory")]
-    use std::{ffi::OsString, sync::Mutex};
+    // TEST-1: `OsString` and `Mutex` were only needed by the removed module-local
+    // egress guard; both now live in `crate::test_env`.
 
     /// Regression test for the negotiation-path bug: when a verifying key is
     /// configured (Ed25519 verification is expected), the legacy HMAC-based
@@ -2248,40 +2248,14 @@ mod tests {
         }
     }
 
+    // TEST-1: this module used to declare its own `EGRESS_ENV_LOCK`, `EGRESS_ENV_VARS`
+    // and `with_clean_egress_env`. That second mutex governed nothing — `src/aeon.rs`
+    // had its own, both ran as threads of the same test process, and the writer below
+    // could poison NEXUS_EGRESS_ALLOW_PRIVATE while an unguarded reader in this very
+    // module constructed an AEON client. All three now come from `crate::test_env`,
+    // so exactly one mutex governs these variables.
     #[cfg(feature = "aeon-memory")]
-    static EGRESS_ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    #[cfg(feature = "aeon-memory")]
-    const EGRESS_ENV_VARS: [&str; 2] = ["NEXUS_EGRESS_ALLOWLIST", "NEXUS_EGRESS_ALLOW_PRIVATE"];
-
-    #[cfg(feature = "aeon-memory")]
-    fn with_clean_egress_env<R>(test: impl FnOnce() -> R + std::panic::UnwindSafe) -> R {
-        let _guard = EGRESS_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
-        let saved: [(&str, Option<OsString>); 2] =
-            EGRESS_ENV_VARS.map(|name| (name, std::env::var_os(name)));
-
-        for name in EGRESS_ENV_VARS {
-            std::env::remove_var(name);
-        }
-
-        let result = std::panic::catch_unwind(test);
-
-        for (name, value) in saved {
-            match value {
-                Some(value) => std::env::set_var(name, value),
-                None => std::env::remove_var(name),
-            }
-        }
-
-        match result {
-            Ok(value) => value,
-            Err(payload) => {
-                std::panic::resume_unwind(payload);
-            }
-        }
-    }
+    use crate::test_env::with_clean_egress_env;
 
     #[tokio::test]
     async fn test_successful_execution() {
@@ -2529,6 +2503,10 @@ mod tests {
     ) -> (crate::aeon::AeonMemoryClient, CapturedAeonRequests) {
         let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured_for_responder = Arc::clone(&captured);
+        // TEST-1: the egress lock is acquired inside `with_test_responder` itself (the
+        // choke point every test-time constructor funnels through), so no guard is
+        // needed here. Guarding here as well would deadlock — std::sync::Mutex is not
+        // reentrant.
         let client = crate::aeon::AeonMemoryClient::with_test_responder(
             &aeon_test_config(management_key),
             Arc::new(move |request| {
@@ -2548,6 +2526,8 @@ mod tests {
     ) -> (crate::aeon::AeonMemoryClient, CapturedAeonRequests) {
         let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured_for_responder = Arc::clone(&captured);
+        // TEST-1: see `aeon_capture_client` — the lock is taken inside
+        // `with_test_responder`; guarding here too would deadlock.
         let client = crate::aeon::AeonMemoryClient::with_test_responder(
             &aeon_test_config(Some("mgmt-key")),
             Arc::new(move |request| {
