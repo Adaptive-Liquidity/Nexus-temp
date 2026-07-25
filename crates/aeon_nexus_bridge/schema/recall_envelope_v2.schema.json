@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://adaptiveliquidity.dev/schema/aeon-recall-envelope-v2.json",
+  "title": "RecallEnvelopeV2",
+  "description": "Replay-resistant AEON-IQ recall attestation. Language-neutral contract; the Rust implementation in crates/aeon_nexus_bridge is one conforming implementation and is proven against vectors/recall_envelope_v2/. Every optional key MUST be present with an explicit null when it has no value -- an absent key is invalid. Timestamps are integer milliseconds since the Unix epoch, never RFC 3339 strings. Scores are fixed-point integer micros; no floating-point value may appear anywhere in this document.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload", "signature"],
+  "properties": {
+    "payload": { "$ref": "#/$defs/payload" },
+    "signature": { "$ref": "#/$defs/signature" }
+  },
+  "$defs": {
+    "sha256Digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "value", "public_recomputable"],
+      "properties": {
+        "algorithm": { "const": "sha256" },
+        "value": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lowercase hex. Uppercase is invalid."
+        },
+        "public_recomputable": { "type": "boolean" }
+      }
+    },
+    "canonicalUuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "minLength": 36,
+      "maxLength": 36,
+      "description": "Canonical lowercase hyphenated UUID, exactly 36 characters. `format: uuid` is deliberately NOT used: it is annotation-only in most validators and would accept uppercase, unhyphenated, braced and urn:uuid forms, which parse to the same value but produce different canonical bytes and therefore different signatures."
+    },
+    "opaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable opaque identifier. MUST NOT contain display names, email addresses, or other unnecessary PII."
+    },
+    "hit": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One ranked memory. provenance_digest and authority_label are per hit and are covered by the signature; null means no authenticated claim (AUTH_0).",
+      "required": [
+        "memory_id",
+        "memory_version_id",
+        "content_digest",
+        "rank",
+        "score_micros",
+        "provenance_digest",
+        "authority_label"
+      ],
+      "properties": {
+        "memory_id": { "$ref": "#/$defs/opaqueId" },
+        "memory_version_id": { "$ref": "#/$defs/opaqueId" },
+        "content_digest": { "$ref": "#/$defs/sha256Digest" },
+        "rank": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Zero-based and equal to this hit's index in hits."
+        },
+        "score_micros": {
+          "type": ["integer", "null"],
+          "description": "Fixed-point micros. null means no score; it MUST NOT be replaced with 0."
+        },
+        "provenance_digest": {
+          "oneOf": [{ "$ref": "#/$defs/sha256Digest" }, { "type": "null" }],
+          "description": "null = no authenticated provenance claim."
+        },
+        "authority_label": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "null = no authenticated authority claim (AUTH_0)."
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "canonicalization_version",
+        "request_id",
+        "nonce",
+        "issued_at_unix_ms",
+        "expires_at_unix_ms",
+        "tenant_id",
+        "workspace_id",
+        "agent_id",
+        "session_id",
+        "mission_id",
+        "run_id",
+        "query_digest",
+        "limit",
+        "retrieval_policy_digest",
+        "embedding_config_digest",
+        "hits"
+      ],
+      "properties": {
+        "protocol_version": { "const": "aeon-recall-envelope-v2" },
+        "canonicalization_version": { "const": "aeon-canonical-json-v1" },
+        "request_id": { "$ref": "#/$defs/canonicalUuid" },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Exactly 32 random bytes, lowercase hex."
+        },
+        "issued_at_unix_ms": { "type": "integer", "minimum": 0 },
+        "expires_at_unix_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "MUST be strictly greater than issued_at_unix_ms, and at most 120000 ms after it."
+        },
+        "tenant_id": { "$ref": "#/$defs/opaqueId" },
+        "workspace_id": {
+          "oneOf": [{ "$ref": "#/$defs/opaqueId" }, { "type": "null" }]
+        },
+        "agent_id": { "$ref": "#/$defs/opaqueId" },
+        "session_id": {
+          "oneOf": [{ "$ref": "#/$defs/opaqueId" }, { "type": "null" }]
+        },
+        "mission_id": {
+          "oneOf": [{ "$ref": "#/$defs/opaqueId" }, { "type": "null" }]
+        },
+        "run_id": { "$ref": "#/$defs/canonicalUuid" },
+        "query_digest": {
+          "allOf": [{ "$ref": "#/$defs/sha256Digest" }],
+          "description": "SHA-256 over the exact UTF-8 query bytes, with no normalization."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Requested cap. hits length MUST be <= limit. This is a request parameter, not a result count. A limit of 0 is rejected: a recall asking for nothing is not meaningfully attestable."
+        },
+        "retrieval_policy_digest": { "$ref": "#/$defs/sha256Digest" },
+        "embedding_config_digest": { "$ref": "#/$defs/sha256Digest" },
+        "hits": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/hit" },
+          "description": "Ordered. An empty array is valid and signable. memory_id values MUST be unique, and memory_version_id values MUST be unique."
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Detached signature over the bytes 'AEON_RECALL_ENVELOPE_V2' || 0x00 || canonical(payload).",
+      "required": [
+        "algorithm",
+        "key_id",
+        "signature",
+        "signed_payload_digest",
+        "signing_domain"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "ed25519",
+          "description": "Frozen. An envelope does not get to nominate its own algorithm; an arbitrary string here is a downgrade vector."
+        },
+        "key_id": { "type": "string", "minLength": 1 },
+        "signature": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{128}$",
+          "description": "Lowercase hex, exactly 128 characters (64-byte Ed25519 signature)."
+        },
+        "signed_payload_digest": {
+          "allOf": [{ "$ref": "#/$defs/sha256Digest" }],
+          "description": "SHA-256 of the SIGNING BYTES (domain prefix included), not of canonical(payload) alone."
+        },
+        "signing_domain": {
+          "const": "AEON_RECALL_ENVELOPE_V2",
+          "description": "Declarative echo of the frozen domain label. Never caller-selectable; a mismatch MUST fail closed."
+        }
+      }
+    }
+  }
+}
