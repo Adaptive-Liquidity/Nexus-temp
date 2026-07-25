@@ -222,7 +222,7 @@ mod tests {
         use std::sync::mpsc;
         use std::thread;
 
-        let (reader_started_tx, reader_started_rx) = mpsc::channel::<()>();
+        let (writer_ready_tx, writer_ready_rx) = mpsc::channel::<()>();
         let (reader_done_tx, reader_done_rx) = mpsc::channel::<()>();
         let (writer_may_release_tx, writer_may_release_rx) = mpsc::channel::<()>();
 
@@ -230,25 +230,31 @@ mod tests {
             with_clean_egress_env(|| {
                 // Invalid value is live for as long as this closure holds the lock.
                 std::env::set_var(EGRESS_ENV_VARS[1], "not-a-bool");
-                // Hand control to the test body, which starts the reader.
+                // Announce only *after* the lock is held and the invalid value is set,
+                // so the reader cannot start before the condition under test exists.
+                // Without this handshake the reader can win the race to the mutex and
+                // complete immediately, which makes the test itself flaky.
+                writer_ready_tx.send(()).expect("signal writer ready");
                 writer_may_release_rx
                     .recv()
                     .expect("test body must signal release");
             });
         });
 
+        // Barrier: the writer provably holds the lock with the invalid value live.
+        writer_ready_rx.recv().expect("writer must become ready");
+
         let reader = thread::spawn(move || {
-            reader_started_tx.send(()).expect("signal reader start");
-            // Blocks until the writer releases; must never observe "not-a-bool".
+            // Blocks on the shared lock; must never observe "not-a-bool".
             construct();
             reader_done_tx.send(()).expect("signal reader done");
         });
 
-        reader_started_rx.recv().expect("reader must start");
-        // Observation (not the load-bearing assertion): the reader should still be
-        // blocked while the writer holds the lock.
+        // Observation, not the load-bearing assertion. A reader that has not yet
+        // reached the mutex also reports "blocked", which can only cause a pass — so
+        // this cannot produce a false failure.
         let blocked_while_writer_held = reader_done_rx
-            .recv_timeout(std::time::Duration::from_millis(150))
+            .recv_timeout(std::time::Duration::from_millis(250))
             .is_err();
 
         writer_may_release_tx.send(()).expect("release writer");
