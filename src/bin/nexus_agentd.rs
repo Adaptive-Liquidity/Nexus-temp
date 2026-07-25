@@ -126,24 +126,46 @@ fn configured_auth_token() -> anyhow::Result<AuthToken> {
     }
 }
 
+/// Pure decision behind the release fail-closed gate.
+///
+/// Compiled in every build profile so the strict branch stays reachable from debug
+/// tests. `enforce_release_auth_requirement` is `#[cfg]`-selected, so in a debug build
+/// the shipped release behaviour is a no-op stub and `cargo test` — which always runs
+/// debug — could never exercise it. Threading the compile-time posture in as
+/// `release_build` keeps the decision itself testable under both postures.
+fn release_auth_requirement_violated(auth_token: &AuthToken, release_build: bool) -> bool {
+    release_build && auth_token.is_none()
+}
+
+/// The single error raised when the release fail-closed gate trips, so the message a
+/// release daemon emits and the message tests assert on cannot drift apart.
+fn release_auth_requirement_error() -> anyhow::Error {
+    anyhow::anyhow!(
+        "release builds refuse to start without daemon authentication ({AUTH_TOKEN_ENV} must be set)"
+    )
+}
+
 /// Release builds must fail closed: refuse to start an unauthenticated daemon
 /// regardless of profile configuration. This closes the "advisory" gap where a
 /// release daemon with no profile and no token would serve Execute/Shutdown
 /// with zero authentication.
 #[cfg(not(debug_assertions))]
 fn enforce_release_auth_requirement(auth_token: &AuthToken) -> anyhow::Result<()> {
-    if auth_token.is_none() {
-        anyhow::bail!(
-            "release builds refuse to start without daemon authentication ({AUTH_TOKEN_ENV} must be set)"
-        );
+    if release_auth_requirement_violated(auth_token, true) {
+        return Err(release_auth_requirement_error());
     }
     Ok(())
 }
 
 /// Debug/test builds retain the permissive behavior so local development and the
-/// existing test suite run without a configured auth token.
+/// existing test suite run without a configured auth token. The predicate is still
+/// evaluated — with `release_build = false`, so it can never trip — which keeps both
+/// profiles routed through the same decision function instead of diverging.
 #[cfg(debug_assertions)]
-fn enforce_release_auth_requirement(_auth_token: &AuthToken) -> anyhow::Result<()> {
+fn enforce_release_auth_requirement(auth_token: &AuthToken) -> anyhow::Result<()> {
+    if release_auth_requirement_violated(auth_token, false) {
+        return Err(release_auth_requirement_error());
+    }
     Ok(())
 }
 
@@ -1140,6 +1162,135 @@ mod profile_auth_tests {
                 let token: AuthToken = None;
                 enforce_profile_auth_requirement(&token)
                     .expect("dev/default (no profile, no release flag) should be permissive");
+            },
+        );
+    }
+
+    // ── compile-time release gate (debug_assertions) regression tests ─────────
+    //
+    // SEC-6 regression cover. The gate these exercise shipped in
+    // "fix(agentd): release builds fail closed without daemon auth" (b887a68, PR #158)
+    // with no tests: it is selected by `#[cfg(not(debug_assertions))]`, and `cargo test`
+    // always builds debug, so the strict branch was unreachable from CI. These assert the
+    // decision function directly, which both `#[cfg]` arms delegate to.
+    //
+    // Note this gate is independent of the runtime `NEXUS_AGENTD_RELEASE` gate covered
+    // above: it consults no environment variable, only build posture and token presence.
+
+    #[test]
+    fn release_build_without_token_is_a_violation() {
+        let token: AuthToken = None;
+        assert!(
+            release_auth_requirement_violated(&token, true),
+            "a release build with no auth token must fail closed"
+        );
+    }
+
+    #[test]
+    fn release_build_with_token_is_not_a_violation() {
+        let token: AuthToken = Some(Arc::from("supersecret"));
+        assert!(
+            !release_auth_requirement_violated(&token, true),
+            "a release build with an auth token must be allowed to start"
+        );
+    }
+
+    #[test]
+    fn debug_build_without_token_is_not_a_violation() {
+        let token: AuthToken = None;
+        assert!(
+            !release_auth_requirement_violated(&token, false),
+            "debug builds stay permissive so local dev and the test suite run tokenless"
+        );
+    }
+
+    #[test]
+    fn debug_build_with_token_is_not_a_violation() {
+        let token: AuthToken = Some(Arc::from("supersecret"));
+        assert!(
+            !release_auth_requirement_violated(&token, false),
+            "debug builds are permissive regardless of token presence"
+        );
+    }
+
+    #[test]
+    fn release_auth_error_names_the_token_env_var() {
+        let err = release_auth_requirement_error().to_string();
+        assert!(
+            err.contains(AUTH_TOKEN_ENV),
+            "operator-facing error must name the env var to set, got: {err}"
+        );
+        assert!(
+            err.contains("refuse to start"),
+            "error must state that startup was refused, got: {err}"
+        );
+    }
+
+    /// Documents the intentional debug/release divergence: in a debug build the wrapper
+    /// is permissive by design. Gated on `debug_assertions` rather than asserting it —
+    /// the claim is about build posture, and under `--release` the wrapper *should*
+    /// refuse, so this test is not meaningful there and must not compile into it.
+    #[test]
+    #[cfg(debug_assertions)]
+    fn wrapper_is_permissive_in_this_debug_test_build() {
+        let token: AuthToken = None;
+        enforce_release_auth_requirement(&token)
+            .expect("debug build wrapper must not refuse a tokenless start");
+    }
+
+    /// Release counterpart, and the assertion that actually covers shipped behaviour:
+    /// under `cargo test --release` the wrapper must REFUSE a tokenless start. Only that
+    /// profile compiles the strict `#[cfg(not(debug_assertions))]` arm, so without this
+    /// test the security-sensitive wiring is never exercised as it is built for release.
+    /// Driven in CI by the `release-auth-gate` job.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn wrapper_refuses_tokenless_start_in_release_test_build() {
+        let token: AuthToken = None;
+        let err = enforce_release_auth_requirement(&token)
+            .expect_err("release build wrapper must refuse a tokenless start");
+        let msg = err.to_string();
+        assert!(
+            msg.contains(AUTH_TOKEN_ENV),
+            "refusal must name the env var to set, got: {msg}"
+        );
+        assert!(
+            msg.contains("refuse to start"),
+            "refusal must state that startup was refused, got: {msg}"
+        );
+    }
+
+    /// The release wrapper must still start when a token IS configured — otherwise a
+    /// fail-closed gate would be indistinguishable from a daemon that never starts.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn wrapper_accepts_configured_token_in_release_test_build() {
+        let token: AuthToken = Some(Arc::from("supersecret"));
+        enforce_release_auth_requirement(&token)
+            .expect("release build wrapper must accept a configured auth token");
+    }
+
+    /// The compile-time gate must not read `NEXUS_AGENTD_RELEASE` — that variable drives
+    /// the separate runtime gate in `enforce_profile_auth_requirement`. Conflating them
+    /// would make the shipped fail-closed posture env-overridable.
+    #[test]
+    fn compile_time_gate_ignores_the_runtime_release_env_var() {
+        with_env(
+            &[
+                (AGENTD_RELEASE_ENV, Some("1")),
+                (AUTH_TOKEN_ENV, None),
+                (AGENTD_PROFILE_ENV, None),
+            ],
+            || {
+                let token: AuthToken = None;
+                assert!(
+                    !release_auth_requirement_violated(&token, false),
+                    "compile-time gate must depend on build posture only, not env vars"
+                );
+                assert!(
+                    release_auth_requirement_violated(&token, true),
+                    "compile-time gate must depend on build posture only, not env vars"
+                );
             },
         );
     }
