@@ -1,6 +1,15 @@
+> 📦 **ARCHIVED (2026-07-25) — historical context only.**
+> Audited line-by-line against the current code before archiving; no work was lost.
+> Sprints 1–2 are merged (#159/#160). Two items this document lists as outstanding were in fact
+> **already complete**: the AEON-IQ HNSW maintenance runbook + worker-locked job, and all seven
+> Nexus-IQ kit docs. The remaining genuine items (CI coverage, the optional post-run memory-diff
+> link) have been absorbed into the current plan.
+> See [`ROADMAP.md`](../ROADMAP.md) for the public product direction; detailed implementation
+> sequencing is maintained internally.
+
 # NexusIQ Completion Blueprint
 
-**Status:** Active · **Created:** 2026-06-25 · **Owner:** orchestrator (Claude) · **Impl:** Codex / ECC lab
+**Status:** Partially superseded (was: Active) · **Created:** 2026-06-25 · **Owner:** orchestrator (Claude) · **Impl:** Codex / ECC lab
 **Basis:** Evidence-backed 4-cluster audit of the ChatGPT "remaining work" report against the live
 `adaptiveliquidity/Nexus`, `adaptiveliquidity/AEON-IQ`, and `adaptiveliquidity/Nexus-IQ` repos (2026-06-25).
 
