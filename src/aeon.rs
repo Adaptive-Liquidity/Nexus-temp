@@ -393,8 +393,31 @@ impl AeonMemoryClient {
         Ok(Some(Self::from_config(config)?))
     }
 
+    /// TEST-1 choke point. `from_config` reads `EgressPolicy::from_env`, so every
+    /// test-time construction must be serialised against tests that temporarily set an
+    /// invalid egress value. Acquiring here rather than at each call site covers all
+    /// callers, including ones written later.
+    ///
+    /// Callers that already hold the lock must use
+    /// [`Self::with_test_responder_under_lock`] instead — `std::sync::Mutex` is not
+    /// reentrant, so calling this while holding the lock would deadlock.
     #[cfg(test)]
     pub(crate) fn with_test_responder(config: &AeonConfig, responder: TestResponder) -> Self {
+        crate::test_env::with_egress_lock(|held| {
+            Self::with_test_responder_under_lock(config, responder, held)
+        })
+    }
+
+    /// As [`Self::with_test_responder`], for callers that already hold the egress lock.
+    ///
+    /// The `&EgressEnvGuard` parameter is the proof: it owns the real `MutexGuard`, so
+    /// this cannot be reached without the lock actually being held.
+    #[cfg(test)]
+    pub(crate) fn with_test_responder_under_lock(
+        config: &AeonConfig,
+        responder: TestResponder,
+        _held: &crate::test_env::EgressEnvGuard<'_>,
+    ) -> Self {
         let mut client = Self::from_config(config).expect("valid AEON test client configuration");
         client.test_responder = Some(responder);
         client
@@ -911,8 +934,23 @@ impl AeonTimelineSink {
         self
     }
 
+    /// TEST-1 choke point — see [`AeonMemoryClient::with_test_responder`]. Callers
+    /// already holding the egress lock must use
+    /// [`Self::with_test_responder_under_lock`].
     #[cfg(test)]
     pub(crate) fn with_test_responder(config: &AeonConfig, responder: TestResponder) -> Self {
+        crate::test_env::with_egress_lock(|held| {
+            Self::with_test_responder_under_lock(config, responder, held)
+        })
+    }
+
+    /// As [`Self::with_test_responder`], for callers that already hold the egress lock.
+    #[cfg(test)]
+    pub(crate) fn with_test_responder_under_lock(
+        config: &AeonConfig,
+        responder: TestResponder,
+        _held: &crate::test_env::EgressEnvGuard<'_>,
+    ) -> Self {
         let mut sink = Self::from_config(config).expect("valid AEON test sink configuration");
         sink.test_responder = Some(responder);
         sink
@@ -1793,7 +1831,12 @@ mod tests {
     use uuid::Uuid;
 
     static AEON_ENV_LOCK: Mutex<()> = Mutex::new(());
-    static EGRESS_ENV_LOCK: Mutex<()> = Mutex::new(());
+    // TEST-1: the egress lock and helper live in `crate::test_env` so they are shared
+    // with every other module's tests. A module-local lock governed nothing, because
+    // `src/hypervisor/mod.rs` declared its own and both ran as threads of the same
+    // test process. Note AEON_ENV_VARS below also contains the two egress vars, so
+    // `with_clean_aeon_env` mutates them and must hold the shared lock too.
+    use crate::test_env::{with_clean_egress_env, EgressEnvGuard};
     const AEON_ENV_VARS: [&str; 12] = [
         ENABLED_ENV,
         BASE_URL_ENV,
@@ -1808,7 +1851,6 @@ mod tests {
         "NEXUS_EGRESS_ALLOWLIST",
         "NEXUS_EGRESS_ALLOW_PRIVATE",
     ];
-    const EGRESS_ENV_VARS: [&str; 2] = ["NEXUS_EGRESS_ALLOWLIST", "NEXUS_EGRESS_ALLOW_PRIVATE"];
 
     #[test]
     fn default_config_is_disabled_local_proxy() {
@@ -1844,7 +1886,7 @@ mod tests {
 
     #[test]
     fn from_env_rejects_invalid_base_url() {
-        with_clean_aeon_env(|| {
+        with_clean_aeon_env(|_| {
             std::env::set_var(BASE_URL_ENV, "not a url");
 
             let error = AeonConfig::from_env().unwrap_err();
@@ -1857,7 +1899,7 @@ mod tests {
 
     #[test]
     fn from_env_rejects_non_http_base_url_scheme() {
-        with_clean_aeon_env(|| {
+        with_clean_aeon_env(|_| {
             std::env::set_var(BASE_URL_ENV, "file:///tmp/aeon.sock");
 
             let error = AeonConfig::from_env().unwrap_err();
@@ -1871,7 +1913,7 @@ mod tests {
 
     #[test]
     fn from_env_rejects_short_hmac_key() {
-        with_clean_aeon_env(|| {
+        with_clean_aeon_env(|_| {
             std::env::set_var(HMAC_KEY_ENV, "00010203");
 
             let error = AeonConfig::from_env().unwrap_err();
@@ -2116,7 +2158,7 @@ mod tests {
         assert!(AeonMemoryClient::from_enabled_config(&missing_key)
             .unwrap()
             .is_none());
-        with_clean_aeon_env(|| {
+        with_clean_aeon_env(|_| {
             assert!(AeonMemoryClient::from_enabled_config(&configured)
                 .unwrap()
                 .is_some());
@@ -2155,7 +2197,7 @@ mod tests {
     /// keeps working with AEON disabled instead of aborting.
     #[test]
     fn init_aeon_memory_client_degrades_on_invalid_egress_when_not_required() {
-        with_clean_aeon_env(|| {
+        with_clean_aeon_env(|_| {
             std::env::set_var("NEXUS_EGRESS_ALLOW_PRIVATE", "not-a-bool");
             // NEXUS_AEON_REQUIRED unset → not required.
             let result = init_aeon_memory_client(&test_config("http://127.0.0.1:1", Some("mgmt")));
@@ -2172,7 +2214,7 @@ mod tests {
     /// attempt broke by wrapping the required path in `unwrap_or_default()`.
     #[test]
     fn init_aeon_memory_client_fails_when_required() {
-        with_clean_aeon_env(|| {
+        with_clean_aeon_env(|_| {
             std::env::set_var("NEXUS_EGRESS_ALLOW_PRIVATE", "not-a-bool");
             std::env::set_var(REQUIRED_ENV, "true");
             let result = init_aeon_memory_client(&test_config("http://127.0.0.1:1", Some("mgmt")));
@@ -2186,7 +2228,7 @@ mod tests {
     /// non-spooling `None`.
     #[test]
     fn init_aeon_timeline_sink_offline_builds_without_management_key() {
-        with_clean_aeon_env(|| {
+        with_clean_aeon_env(|_| {
             let mut config = test_config("http://aeon.test", None);
             config.enabled = false;
             let sink = init_aeon_timeline_sink_offline(&config)
@@ -2231,16 +2273,17 @@ mod tests {
             .verifying_key()
             .to_bytes();
         let session_id = session_id.map(str::to_string);
-        with_clean_aeon_env(|| {
+        with_clean_aeon_env(|held| {
             let mut config = test_config("http://aeon.test", Some("mgmt"));
             config.verifying_key = Some(vk);
             config.session_id = session_id.clone();
-            AeonMemoryClient::with_test_responder(
+            AeonMemoryClient::with_test_responder_under_lock(
                 &config,
                 Arc::new(move |_request| TestHttpResponse {
                     status: 200,
                     body: body.clone(),
                 }),
+                held,
             )
         })
     }
@@ -2392,11 +2435,11 @@ mod tests {
 
         use ed25519_dalek::SigningKey;
         let vk = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
-        let client = with_clean_aeon_env(|| {
+        let client = with_clean_aeon_env(|held| {
             let mut config = test_config("http://aeon.test", Some("mgmt"));
             config.verifying_key = Some(vk);
             config.session_id = Some("sess-1".to_string());
-            AeonMemoryClient::with_test_responder(
+            AeonMemoryClient::with_test_responder_under_lock(
                 &config,
                 Arc::new(move |request| {
                     *captured_for_responder.lock().unwrap() = Some(request);
@@ -2405,6 +2448,7 @@ mod tests {
                         body: body.clone(),
                     }
                 }),
+                held,
             )
         });
 
@@ -2454,8 +2498,8 @@ mod tests {
         let response_body = response_body.to_string();
         let captured = Arc::new(Mutex::new(Vec::new()));
         let captured_for_responder = Arc::clone(&captured);
-        let client = with_clean_aeon_env(|| {
-            AeonMemoryClient::with_test_responder(
+        let client = with_clean_aeon_env(|held| {
+            AeonMemoryClient::with_test_responder_under_lock(
                 &test_config("http://aeon.test", management_key),
                 Arc::new(move |request| {
                     captured_for_responder.lock().unwrap().push(request);
@@ -2464,6 +2508,7 @@ mod tests {
                         body: response_body.clone(),
                     }
                 }),
+                held,
             )
         });
         (client, captured)
@@ -2475,60 +2520,53 @@ mod tests {
         requests.remove(0)
     }
 
-    fn with_clean_aeon_env<R>(test: impl FnOnce() -> R + std::panic::UnwindSafe) -> R {
-        let _guard = AEON_ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let saved: [(&str, Option<OsString>); 12] =
-            AEON_ENV_VARS.map(|name| (name, std::env::var_os(name)));
+    /// RAII restoration for the 12 AEON env vars, mirroring `test_env`'s egress guard:
+    /// unwinding performs the restoration, so a panicking test cannot leak values.
+    struct AeonEnvRestore {
+        saved: [(&'static str, Option<OsString>); 12],
+    }
+
+    impl Drop for AeonEnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in &self.saved {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+
+    /// Clear the AEON environment for `test`, handing it proof that the egress lock is
+    /// held.
+    ///
+    /// AEON_ENV_VARS includes NEXUS_EGRESS_ALLOWLIST and NEXUS_EGRESS_ALLOW_PRIVATE, so
+    /// this helper mutates the egress environment and must hold the crate-wide egress
+    /// lock too (TEST-1). Lock order is always AEON_ENV_LOCK then the egress lock;
+    /// nothing acquires them in the reverse order, so this cannot deadlock.
+    ///
+    /// The `&EgressEnvGuard` passed to `test` lets nested code call the
+    /// `*_under_lock` constructors, which would otherwise deadlock on the
+    /// non-reentrant mutex this already holds.
+    fn with_clean_aeon_env<R>(test: impl FnOnce(&EgressEnvGuard<'_>) -> R) -> R {
+        let _aeon_guard = AEON_ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let egress_held = EgressEnvGuard::acquire();
+
+        let _restore = AeonEnvRestore {
+            saved: AEON_ENV_VARS.map(|name| (name, std::env::var_os(name))),
+        };
 
         for name in AEON_ENV_VARS {
             std::env::remove_var(name);
         }
 
-        let result = std::panic::catch_unwind(test);
-
-        for (name, value) in saved {
-            match value {
-                Some(value) => std::env::set_var(name, value),
-                None => std::env::remove_var(name),
-            }
-        }
-
-        match result {
-            Ok(value) => value,
-            Err(payload) => {
-                std::panic::resume_unwind(payload);
-            }
-        }
+        test(&egress_held)
     }
 
-    fn with_clean_egress_env<R>(test: impl FnOnce() -> R + std::panic::UnwindSafe) -> R {
-        let _guard = AEON_ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let _egress_guard = EGRESS_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
-        let saved: [(&str, Option<OsString>); 2] =
-            EGRESS_ENV_VARS.map(|name| (name, std::env::var_os(name)));
-
-        for name in EGRESS_ENV_VARS {
-            std::env::remove_var(name);
-        }
-
-        let result = std::panic::catch_unwind(test);
-
-        for (name, value) in saved {
-            match value {
-                Some(value) => std::env::set_var(name, value),
-                None => std::env::remove_var(name),
-            }
-        }
-
-        match result {
-            Ok(value) => value,
-            Err(payload) => {
-                std::panic::resume_unwind(payload);
-            }
-        }
-    }
+    // TEST-1: the former module-local `with_clean_egress_env` (and its module-local
+    // EGRESS_ENV_LOCK / EGRESS_ENV_VARS) are gone. It is imported from
+    // `crate::test_env` at the top of this module so that this module and
+    // `src/hypervisor/mod.rs` contend on the same mutex.
 
     fn memory_evidence_with_hit(content: &str) -> MemoryEvidenceV1 {
         use crate::proof::schema::MemoryAttestationMode;
