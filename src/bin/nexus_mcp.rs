@@ -3761,6 +3761,64 @@ mod tests {
     }
 
     #[cfg(feature = "mcp-http")]
+    impl McpHttpEnvGuard {
+        /// Value the variable held *before* this guard cleared it.
+        ///
+        /// Tests that need genuine ambient configuration — a PostgreSQL URL
+        /// supplied by CI, for instance — must read it from here. Reading the
+        /// process environment after the guard is constructed always yields
+        /// `None`, because the guard clears every entry in `MCP_HTTP_ENV_VARS`
+        /// so a developer's ambient config cannot leak into tests.
+        #[cfg_attr(not(feature = "tenant-registry-postgres"), allow(dead_code))]
+        fn saved_var(&self, name: &str) -> Option<String> {
+            self.saved
+                .iter()
+                .find(|(saved_name, _)| *saved_name == name)
+                .and_then(|(_, value)| value.clone())
+                .and_then(|value| value.into_string().ok())
+        }
+    }
+
+    /// Set to `1`/`true` to turn a skipped PostgreSQL integration test into a
+    /// hard failure. CI sets it so the job cannot report success while silently
+    /// testing nothing.
+    #[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
+    const REQUIRE_POSTGRES_TESTS_ENV: &str = "NEXUS_MCP_REQUIRE_POSTGRES_TESTS";
+
+    /// Resolves the database URL for the PostgreSQL integration test, emitting a
+    /// visible marker when the test is skipped.
+    ///
+    /// A bare `return` on a missing URL makes a broken database path
+    /// indistinguishable from a pass, so a skip must announce itself and CI must
+    /// be able to forbid skipping outright.
+    #[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
+    fn postgres_test_db_url(guard: &McpHttpEnvGuard) -> Option<String> {
+        let required = matches!(
+            std::env::var(REQUIRE_POSTGRES_TESTS_ENV).as_deref(),
+            Ok("1") | Ok("true")
+        );
+
+        match guard
+            .saved_var(NEXUS_MCP_TENANT_DB_URL_ENV)
+            .filter(|url| !url.trim().is_empty())
+        {
+            Some(url) => Some(url),
+            None => {
+                assert!(
+                    !required,
+                    "{REQUIRE_POSTGRES_TESTS_ENV} is set but {NEXUS_MCP_TENANT_DB_URL_ENV} is \
+                     unset or empty - the PostgreSQL tenant-registry test must not skip here"
+                );
+                println!(
+                    "SKIP: postgres tenant-registry integration test - {NEXUS_MCP_TENANT_DB_URL_ENV} \
+                     is not set. Set {REQUIRE_POSTGRES_TESTS_ENV}=1 to make this a failure."
+                );
+                None
+            }
+        }
+    }
+
+    #[cfg(feature = "mcp-http")]
     fn acquire_mcp_http_env() -> McpHttpEnvGuard {
         let lock = MCP_HTTP_ENV_LOCK.lock().unwrap();
         let saved = MCP_HTTP_ENV_VARS
@@ -4619,20 +4677,21 @@ mod tests {
     #[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
     #[tokio::test]
     async fn postgres_tenant_snapshot_loads_active_rows_from_db_table() {
-        let _guard = acquire_mcp_http_env();
-        let db_url = match std::env::var(NEXUS_MCP_TENANT_DB_URL_ENV) {
-            Ok(url) if !url.trim().is_empty() => url,
-            _ => return,
+        let guard = acquire_mcp_http_env();
+        // Must come from the guard: `acquire_mcp_http_env` clears
+        // NEXUS_MCP_TENANT_DB_URL, so reading the live environment here would
+        // always be empty and the test would silently do nothing.
+        let Some(db_url) = postgres_test_db_url(&guard) else {
+            return;
         };
 
-        let pool = match sqlx::postgres::PgPoolOptions::new()
+        let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(1)
             .connect(&db_url)
             .await
-        {
-            Ok(pool) => pool,
-            Err(_) => return,
-        };
+            .unwrap_or_else(|error| {
+                panic!("failed to connect to {NEXUS_MCP_TENANT_DB_URL_ENV}: {error}")
+            });
 
         let relation = format!(
             "tenant_registry_test_{}_{}",
@@ -4645,9 +4704,10 @@ mod tests {
         let create = format!(
             "CREATE TEMP TABLE {relation} (key_sha256 TEXT NOT NULL, workspace_id TEXT NOT NULL, rate_limit_rpm INTEGER, status TEXT NOT NULL)"
         );
-        if sqlx::query(&create).execute(&pool).await.is_err() {
-            return;
-        }
+        sqlx::query(&create)
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|error| panic!("failed to create temp table {relation}: {error}"));
 
         let active_key = sha256_hex("postgres-active-key");
         let revoked_key = sha256_hex("postgres-revoked-key");
@@ -4655,7 +4715,7 @@ mod tests {
         let insert = format!(
             "INSERT INTO {relation} (key_sha256, workspace_id, rate_limit_rpm, status) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)"
         );
-        if sqlx::query(&insert)
+        sqlx::query(&insert)
             .bind(active_key.clone())
             .bind("tenant-acme")
             .bind(Option::<i64>::Some(active_rate_limit_rpm))
@@ -4666,21 +4726,17 @@ mod tests {
             .bind("revoked")
             .execute(&pool)
             .await
-            .is_err()
-        {
-            return;
-        }
+            .unwrap_or_else(|error| panic!("failed to seed {relation}: {error}"));
 
-        let snapshot = match load_postgres_tenant_snapshot(
+        let snapshot = load_postgres_tenant_snapshot(
             &pool,
             &relation,
             NEXUS_MCP_HTTP_DEFAULT_TENANT_RATE_LIMIT_RPM,
         )
         .await
-        {
-            Ok(snapshot) => snapshot,
-            Err(_) => return,
-        };
+        .unwrap_or_else(|error| {
+            panic!("load_postgres_tenant_snapshot({relation}) failed: {error}")
+        });
         assert_eq!(snapshot.len(), 1);
 
         let tenant = snapshot
