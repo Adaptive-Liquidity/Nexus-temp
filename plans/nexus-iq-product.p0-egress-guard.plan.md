@@ -1,3 +1,8 @@
+> 📦 **ARCHIVED (2026-07-25) — historical context only.**
+> The core work here is merged. This document was audited against the current code before archiving;
+> any items still outstanding were absorbed into the current plan. See [`ROADMAP.md`](../ROADMAP.md)
+> for the public product direction; detailed sequencing is maintained internally.
+
 # Plan: P0 — SSRF / Egress Guard (Nexus runtime)
 
 **Source PRD**: plans/nexus-iq-product.prd.md

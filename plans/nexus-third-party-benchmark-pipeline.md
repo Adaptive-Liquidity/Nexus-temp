@@ -1,3 +1,8 @@
+> 📦 **ARCHIVED (2026-07-25) — historical context only.**
+> The core work here is merged. This document was audited against the current code before archiving;
+> any items still outstanding were absorbed into the current plan. See [`ROADMAP.md`](../ROADMAP.md)
+> for the public product direction; detailed sequencing is maintained internally.
+
 # Blueprint: Nexus Third-Party Verifiable Benchmark Pipeline
 
 **Objective:** Ship a fully automated, cryptographically attestable, publicly viewable benchmark pipeline that runs Nexus's Criterion suite on neutral GitHub-hosted hardware, publishes to Bencher.dev + Codspeed.io, and renders a public comparison dashboard.
