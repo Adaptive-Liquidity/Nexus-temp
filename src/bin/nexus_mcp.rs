@@ -2098,25 +2098,36 @@ const NEXUS_MCP_TENANT_SOURCE_ENV: &str = "NEXUS_MCP_TENANT_SOURCE";
 const NEXUS_MCP_TENANT_SOURCE_FILE: &str = "file";
 #[cfg(feature = "mcp-http")]
 const NEXUS_MCP_TENANT_SOURCE_POSTGRES: &str = "postgres";
+// Tenant-registry environment variable *names*. The test env guard
+// (`MCP_HTTP_ENV_VARS`) saves and clears these on every `mcp-http` build so a
+// developer's ambient configuration cannot leak into tests, which is why they
+// stay gated on `mcp-http` alone. Their only non-test readers live behind
+// `tenant-registry-postgres`, so they are legitimately unused in an
+// `mcp-http`-without-registry binary.
 #[cfg(feature = "mcp-http")]
+#[cfg_attr(not(feature = "tenant-registry-postgres"), allow(dead_code))]
 const NEXUS_MCP_TENANT_DB_URL_ENV: &str = "NEXUS_MCP_TENANT_DB_URL";
 #[cfg(feature = "mcp-http")]
+#[cfg_attr(not(feature = "tenant-registry-postgres"), allow(dead_code))]
 const NEXUS_MCP_TENANT_DB_RELATION_ENV: &str = "NEXUS_MCP_TENANT_DB_RELATION";
-#[cfg(feature = "mcp-http")]
+#[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
 const NEXUS_MCP_TENANT_DB_RELATION_DEFAULT: &str = "api_keys";
-#[cfg(feature = "mcp-http")]
+#[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
 const NEXUS_MCP_TENANT_ACTIVE_API_KEYS_VIEW: &str = "active_api_keys";
 #[cfg(feature = "mcp-http")]
+#[cfg_attr(not(feature = "tenant-registry-postgres"), allow(dead_code))]
 const NEXUS_MCP_TENANT_REFRESH_SECS_ENV: &str = "NEXUS_MCP_TENANT_REFRESH_SECS";
-#[cfg(feature = "mcp-http")]
+#[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
 const NEXUS_MCP_TENANT_REFRESH_SECS_DEFAULT: u64 = 20;
 #[cfg(feature = "mcp-http")]
+#[cfg_attr(not(feature = "tenant-registry-postgres"), allow(dead_code))]
 const NEXUS_MCP_TENANT_MAX_STALE_SECS_ENV: &str = "NEXUS_MCP_TENANT_MAX_STALE_SECS";
-#[cfg(feature = "mcp-http")]
+#[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
 const NEXUS_MCP_TENANT_MAX_STALE_SECS_DEFAULT: u64 = 60;
 #[cfg(feature = "mcp-http")]
+#[cfg_attr(not(feature = "tenant-registry-postgres"), allow(dead_code))]
 const NEXUS_MCP_TENANT_DB_TIMEOUT_SECS_ENV: &str = "NEXUS_MCP_TENANT_DB_TIMEOUT_SECS";
-#[cfg(feature = "mcp-http")]
+#[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
 const NEXUS_MCP_TENANT_DB_TIMEOUT_SECS_DEFAULT: u64 = 10;
 #[cfg(feature = "mcp-http")]
 const NEXUS_MCP_HTTP_DEFAULT_TENANT_RATE_LIMIT_RPM: u64 = 60;
@@ -2401,7 +2412,7 @@ fn parse_tenant_source() -> Result<TenantSource> {
     }
 }
 
-#[cfg(feature = "mcp-http")]
+#[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
 fn parse_tenant_db_url() -> Result<Option<String>> {
     match std::env::var(NEXUS_MCP_TENANT_DB_URL_ENV) {
         Ok(url) => Ok(normalize_http_token(&url)),
@@ -2412,7 +2423,7 @@ fn parse_tenant_db_url() -> Result<Option<String>> {
     }
 }
 
-#[cfg(feature = "mcp-http")]
+#[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
 fn parse_tenant_db_relation() -> Result<String> {
     let relation = std::env::var(NEXUS_MCP_TENANT_DB_RELATION_ENV)
         .unwrap_or_else(|_| NEXUS_MCP_TENANT_DB_RELATION_DEFAULT.to_string())
@@ -2429,7 +2440,7 @@ fn parse_tenant_db_relation() -> Result<String> {
     Ok(relation)
 }
 
-#[cfg(feature = "mcp-http")]
+#[cfg(all(feature = "mcp-http", feature = "tenant-registry-postgres"))]
 fn parse_tenant_env_u64(name: &str, default: u64) -> Result<u64> {
     Ok(match std::env::var(name) {
         Ok(value) => value
