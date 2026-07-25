@@ -1,6 +1,12 @@
 # PRD: Nexus-IQ as a Consumer-Facing Product
 
-**Status**: draft
+> ⚠️ **SUPERSEDED (2026-07-25) — do not follow this plan.**
+> See [`ROADMAP.md`](../ROADMAP.md) for the current public product direction. Detailed
+> implementation sequencing is maintained internally. Retained here for history only.
+> Specifically outdated: the milestone status table (P0–P2.5 are merged), the "control plane first"
+> sequencing, and gated cloud execution (deprioritized).
+
+**Status**: SUPERSEDED (was: draft)
 **Owner**: contact@adaptiveliquidity.com
 **Created**: 2026-06-28
 **Format**: problem-first PRD (ecc:plan-prd)

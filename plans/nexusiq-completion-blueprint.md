@@ -1,6 +1,11 @@
+> ⚠️ **PARTIALLY SUPERSEDED (2026-07-25).** Sprints 1–2 are merged (#159/#160). Remaining
+> packaging/CI scope has been folded into the current plan — see [`ROADMAP.md`](../ROADMAP.md) for
+> the public product direction. Detailed implementation sequencing is maintained internally.
+> Use this document for historical context only.
+
 # NexusIQ Completion Blueprint
 
-**Status:** Active · **Created:** 2026-06-25 · **Owner:** orchestrator (Claude) · **Impl:** Codex / ECC lab
+**Status:** Partially superseded (was: Active) · **Created:** 2026-06-25 · **Owner:** orchestrator (Claude) · **Impl:** Codex / ECC lab
 **Basis:** Evidence-backed 4-cluster audit of the ChatGPT "remaining work" report against the live
 `adaptiveliquidity/Nexus`, `adaptiveliquidity/AEON-IQ`, and `adaptiveliquidity/Nexus-IQ` repos (2026-06-25).
 
