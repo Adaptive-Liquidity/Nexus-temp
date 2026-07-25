@@ -2193,8 +2193,8 @@ fn is_hex_digest(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "aeon-memory")]
-    use std::{ffi::OsString, sync::Mutex};
+    // TEST-1: `OsString` and `Mutex` were only needed by the removed module-local
+    // egress guard; both now live in `crate::test_env`.
 
     /// Regression test for the negotiation-path bug: when a verifying key is
     /// configured (Ed25519 verification is expected), the legacy HMAC-based
