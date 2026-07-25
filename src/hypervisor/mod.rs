@@ -2248,40 +2248,14 @@ mod tests {
         }
     }
 
+    // TEST-1: this module used to declare its own `EGRESS_ENV_LOCK`, `EGRESS_ENV_VARS`
+    // and `with_clean_egress_env`. That second mutex governed nothing — `src/aeon.rs`
+    // had its own, both ran as threads of the same test process, and the writer below
+    // could poison NEXUS_EGRESS_ALLOW_PRIVATE while an unguarded reader in this very
+    // module constructed an AEON client. All three now come from `crate::test_env`,
+    // so exactly one mutex governs these variables.
     #[cfg(feature = "aeon-memory")]
-    static EGRESS_ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    #[cfg(feature = "aeon-memory")]
-    const EGRESS_ENV_VARS: [&str; 2] = ["NEXUS_EGRESS_ALLOWLIST", "NEXUS_EGRESS_ALLOW_PRIVATE"];
-
-    #[cfg(feature = "aeon-memory")]
-    fn with_clean_egress_env<R>(test: impl FnOnce() -> R + std::panic::UnwindSafe) -> R {
-        let _guard = EGRESS_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
-        let saved: [(&str, Option<OsString>); 2] =
-            EGRESS_ENV_VARS.map(|name| (name, std::env::var_os(name)));
-
-        for name in EGRESS_ENV_VARS {
-            std::env::remove_var(name);
-        }
-
-        let result = std::panic::catch_unwind(test);
-
-        for (name, value) in saved {
-            match value {
-                Some(value) => std::env::set_var(name, value),
-                None => std::env::remove_var(name),
-            }
-        }
-
-        match result {
-            Ok(value) => value,
-            Err(payload) => {
-                std::panic::resume_unwind(payload);
-            }
-        }
-    }
+    use crate::test_env::with_clean_egress_env;
 
     #[tokio::test]
     async fn test_successful_execution() {
@@ -2529,16 +2503,25 @@ mod tests {
     ) -> (crate::aeon::AeonMemoryClient, CapturedAeonRequests) {
         let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured_for_responder = Arc::clone(&captured);
-        let client = crate::aeon::AeonMemoryClient::with_test_responder(
-            &aeon_test_config(management_key),
-            Arc::new(move |request| {
-                captured_for_responder.lock().unwrap().push(request);
-                crate::aeon::TestHttpResponse {
-                    status,
-                    body: r#"{"id":"550e8400-e29b-41d4-a716-446655440000"}"#.to_string(),
-                }
-            }),
-        );
+        // TEST-1: `with_test_responder` reaches EgressPolicy::from_env, so construction
+        // must hold the crate-wide egress lock — otherwise the writer in
+        // `hypervisor_new_succeeds_when_optional_aeon_egress_config_is_invalid` can have
+        // NEXUS_EGRESS_ALLOW_PRIVATE poisoned while we build. Guarding here rather than
+        // at each call site covers every caller (including future ones) and keeps the
+        // lock strictly around synchronous construction: this fn is sync, so the guard
+        // is released before any caller's `.await`.
+        let client = with_clean_egress_env(|| {
+            crate::aeon::AeonMemoryClient::with_test_responder(
+                &aeon_test_config(management_key),
+                Arc::new(move |request| {
+                    captured_for_responder.lock().unwrap().push(request);
+                    crate::aeon::TestHttpResponse {
+                        status,
+                        body: r#"{"id":"550e8400-e29b-41d4-a716-446655440000"}"#.to_string(),
+                    }
+                }),
+            )
+        });
         (client, captured)
     }
 
@@ -2548,18 +2531,23 @@ mod tests {
     ) -> (crate::aeon::AeonMemoryClient, CapturedAeonRequests) {
         let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured_for_responder = Arc::clone(&captured);
-        let client = crate::aeon::AeonMemoryClient::with_test_responder(
-            &aeon_test_config(Some("mgmt-key")),
-            Arc::new(move |request| {
-                captured_for_responder.lock().unwrap().push(request);
-                crate::aeon::TestHttpResponse {
-                    status: 200,
-                    body: format!(
-                        r#"{{"results":[{{"id":"mem-1","content":{content:?},"score":0.9}}]}}"#
-                    ),
-                }
-            }),
-        );
+        // TEST-1: see `aeon_capture_client` — construction reaches
+        // EgressPolicy::from_env and must hold the crate-wide egress lock. Sync fn, so
+        // the guard is released before any caller's `.await`.
+        let client = with_clean_egress_env(|| {
+            crate::aeon::AeonMemoryClient::with_test_responder(
+                &aeon_test_config(Some("mgmt-key")),
+                Arc::new(move |request| {
+                    captured_for_responder.lock().unwrap().push(request);
+                    crate::aeon::TestHttpResponse {
+                        status: 200,
+                        body: format!(
+                            r#"{{"results":[{{"id":"mem-1","content":{content:?},"score":0.9}}]}}"#
+                        ),
+                    }
+                }),
+            )
+        });
         (client, captured)
     }
 

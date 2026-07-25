@@ -1793,7 +1793,12 @@ mod tests {
     use uuid::Uuid;
 
     static AEON_ENV_LOCK: Mutex<()> = Mutex::new(());
-    static EGRESS_ENV_LOCK: Mutex<()> = Mutex::new(());
+    // TEST-1: the egress lock and helper live in `crate::test_env` so they are shared
+    // with every other module's tests. A module-local lock governed nothing, because
+    // `src/hypervisor/mod.rs` declared its own and both ran as threads of the same
+    // test process. Note AEON_ENV_VARS below also contains the two egress vars, so
+    // `with_clean_aeon_env` mutates them and must hold the shared lock too.
+    use crate::test_env::{with_clean_egress_env, EGRESS_ENV_LOCK};
     const AEON_ENV_VARS: [&str; 12] = [
         ENABLED_ENV,
         BASE_URL_ENV,
@@ -1808,7 +1813,6 @@ mod tests {
         "NEXUS_EGRESS_ALLOWLIST",
         "NEXUS_EGRESS_ALLOW_PRIVATE",
     ];
-    const EGRESS_ENV_VARS: [&str; 2] = ["NEXUS_EGRESS_ALLOWLIST", "NEXUS_EGRESS_ALLOW_PRIVATE"];
 
     #[test]
     fn default_config_is_disabled_local_proxy() {
@@ -2477,6 +2481,14 @@ mod tests {
 
     fn with_clean_aeon_env<R>(test: impl FnOnce() -> R + std::panic::UnwindSafe) -> R {
         let _guard = AEON_ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        // AEON_ENV_VARS includes NEXUS_EGRESS_ALLOWLIST and NEXUS_EGRESS_ALLOW_PRIVATE,
+        // so this helper mutates the egress environment and must hold the crate-wide
+        // egress lock as well — otherwise a reader in another module races it (TEST-1).
+        // Lock order is always AEON_ENV_LOCK then EGRESS_ENV_LOCK; nothing acquires
+        // them in the reverse order, so this cannot deadlock.
+        let _egress_guard = EGRESS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         let saved: [(&str, Option<OsString>); 12] =
             AEON_ENV_VARS.map(|name| (name, std::env::var_os(name)));
 
@@ -2501,34 +2513,10 @@ mod tests {
         }
     }
 
-    fn with_clean_egress_env<R>(test: impl FnOnce() -> R + std::panic::UnwindSafe) -> R {
-        let _guard = AEON_ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let _egress_guard = EGRESS_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
-        let saved: [(&str, Option<OsString>); 2] =
-            EGRESS_ENV_VARS.map(|name| (name, std::env::var_os(name)));
-
-        for name in EGRESS_ENV_VARS {
-            std::env::remove_var(name);
-        }
-
-        let result = std::panic::catch_unwind(test);
-
-        for (name, value) in saved {
-            match value {
-                Some(value) => std::env::set_var(name, value),
-                None => std::env::remove_var(name),
-            }
-        }
-
-        match result {
-            Ok(value) => value,
-            Err(payload) => {
-                std::panic::resume_unwind(payload);
-            }
-        }
-    }
+    // TEST-1: the former module-local `with_clean_egress_env` (and its module-local
+    // EGRESS_ENV_LOCK / EGRESS_ENV_VARS) are gone. It is imported from
+    // `crate::test_env` at the top of this module so that this module and
+    // `src/hypervisor/mod.rs` contend on the same mutex.
 
     fn memory_evidence_with_hit(content: &str) -> MemoryEvidenceV1 {
         use crate::proof::schema::MemoryAttestationMode;
