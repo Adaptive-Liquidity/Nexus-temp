@@ -233,7 +233,12 @@ mod tests {
     }
 
     fn unconfigured_memory_client() -> AeonMemoryClient {
-        AeonMemoryClient::from_config(&test_config(None)).unwrap()
+        // TEST-1: this calls `from_config` directly rather than going through the
+        // `with_test_responder` choke point, so it needs the shared egress guard
+        // explicitly — `from_config` reads EgressPolicy::from_env.
+        crate::test_env::with_clean_egress_env(|| {
+            AeonMemoryClient::from_config(&test_config(None)).unwrap()
+        })
     }
 
     fn read_capability(path: &str) -> Capability {

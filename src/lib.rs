@@ -16,6 +16,12 @@ pub mod security;
 pub mod snapshot;
 pub mod telemetry;
 
+/// Test-only. One crate-wide lock over the process-global egress environment
+/// variables, shared by every module's tests (TEST-1). Gated on `aeon-memory`
+/// because only that feature's tests mutate those variables.
+#[cfg(all(test, feature = "aeon-memory"))]
+mod test_env;
+
 // Re-export commonly used types
 #[cfg(feature = "aeon-memory")]
 pub use aeon::{
