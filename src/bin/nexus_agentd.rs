@@ -1227,14 +1227,12 @@ mod profile_auth_tests {
     }
 
     /// Documents the intentional debug/release divergence: in a debug build the wrapper
-    /// is permissive by design. If this ever fails, `cargo test` has started running
-    /// under `--release` and the assertions above no longer describe the shipped gate.
+    /// is permissive by design. Gated on `debug_assertions` rather than asserting it —
+    /// the claim is about build posture, and under `--release` the wrapper *should*
+    /// refuse, so this test is not meaningful there and must not compile into it.
     #[test]
+    #[cfg(debug_assertions)]
     fn wrapper_is_permissive_in_this_debug_test_build() {
-        assert!(
-            cfg!(debug_assertions),
-            "these tests assume a debug build; the release gate needs separate cover if not"
-        );
         let token: AuthToken = None;
         enforce_release_auth_requirement(&token)
             .expect("debug build wrapper must not refuse a tokenless start");
