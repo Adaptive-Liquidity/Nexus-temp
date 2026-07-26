@@ -21,13 +21,13 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt::{self, Write as _};
 
-use serde::de::{DeserializeOwned, Deserializer};
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{MemoryScore, TypedDigest, SHA256_ALGORITHM};
+use crate::{MemoryScore, SHA256_ALGORITHM};
 
 // ── Frozen constants ─────────────────────────────────────────────────────────
 
@@ -159,6 +159,79 @@ impl Serialize for CanonicalUuid {
     }
 }
 
+/// The strict SHA-256 digest used only by RecallEnvelopeV2.
+///
+/// Unlike the frozen V1 [`crate::TypedDigest`], this type cannot represent an
+/// unsupported algorithm or malformed value. Its custom deserializer also
+/// rejects unknown and duplicate members before canonicalization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RecallDigestV2 {
+    algorithm: String,
+    value: String,
+    public_recomputable: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecallDigestV2Wire {
+    algorithm: String,
+    value: String,
+    public_recomputable: bool,
+}
+
+impl RecallDigestV2 {
+    /// Compute a valid V2 SHA-256 digest.
+    pub fn sha256(bytes: &[u8], public_recomputable: bool) -> Self {
+        Self {
+            algorithm: SHA256_ALGORITHM.to_owned(),
+            value: sha256_hex(bytes),
+            public_recomputable,
+        }
+    }
+
+    pub fn algorithm(&self) -> &str {
+        &self.algorithm
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    pub fn public_recomputable(&self) -> bool {
+        self.public_recomputable
+    }
+
+    fn from_wire(wire: RecallDigestV2Wire) -> Result<Self, String> {
+        if wire.algorithm != SHA256_ALGORITHM {
+            return Err(format!(
+                "digest algorithm must be exactly {SHA256_ALGORITHM}"
+            ));
+        }
+        if wire.value.len() != SHA256_HEX_LEN
+            || !wire
+                .value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(format!(
+                "digest value must be exactly {SHA256_HEX_LEN} lowercase hexadecimal characters"
+            ));
+        }
+        Ok(Self {
+            algorithm: wire.algorithm,
+            value: wire.value,
+            public_recomputable: wire.public_recomputable,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for RecallDigestV2 {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = RecallDigestV2Wire::deserialize(deserializer)?;
+        Self::from_wire(wire).map_err(serde::de::Error::custom)
+    }
+}
+
 impl<'de> Deserialize<'de> for CanonicalUuid {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
@@ -175,9 +248,10 @@ impl<'de> Deserialize<'de> for CanonicalUuid {
 /// This exists because `Option<T>` cannot express that rule: serde's derive
 /// silently treats a missing field of type `Option<T>` as `None`, so `{...}`
 /// and `{"session_id":null,...}` would both parse while producing *different*
-/// canonical bytes and therefore different signatures. Since `Nullable<T>` is
-/// not literally `Option<T>`, serde requires the key to be present and a
-/// missing key fails closed.
+/// canonical bytes and therefore different signatures. Each wire field uses a
+/// field-level deserializer without `default`, making a missing key fail as a
+/// missing field. Present values deserialize directly from the original Serde
+/// stream, preserving nested duplicate-key detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Nullable<T>(Option<T>);
 
@@ -224,25 +298,17 @@ impl<T: Serialize> Serialize for Nullable<T> {
     }
 }
 
-impl<'de, T: DeserializeOwned> Deserialize<'de> for Nullable<T> {
+fn deserialize_required_nullable<'de, D, T>(deserializer: D) -> Result<Nullable<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Nullable)
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Nullable<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        // Deliberately NOT `Option::<T>::deserialize`.
-        //
-        // That routes through `deserialize_option`, and serde's internal
-        // missing-field deserializer answers `deserialize_option` with `None`.
-        // An absent key would therefore parse as `null` and this whole type
-        // would be decorative -- which is precisely the bug the
-        // `absent_optional_keys_are_rejected` test caught on the first run.
-        //
-        // Going through `Value` uses `deserialize_any`, which the missing-field
-        // deserializer rejects outright, so an absent key fails closed.
-        let value = Value::deserialize(deserializer)?;
-        match value {
-            Value::Null => Ok(Self(None)),
-            present => T::deserialize(present)
-                .map(|inner| Self(Some(inner)))
-                .map_err(serde::de::Error::custom),
-        }
+        Option::<T>::deserialize(deserializer).map(Self)
     }
 }
 
@@ -254,15 +320,18 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Nullable<T> {
 pub struct RecallHitV2 {
     pub memory_id: String,
     pub memory_version_id: String,
-    pub content_digest: TypedDigest,
+    pub content_digest: RecallDigestV2,
     /// Zero-based, contiguous, and equal to this hit's index in `hits`.
     pub rank: u32,
     /// Fixed-point score in micros. Never a float, never zero-substituted:
     /// an absent score is explicit `null`.
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub score_micros: Nullable<MemoryScore>,
     /// `null` = no authenticated provenance claim.
-    pub provenance_digest: Nullable<TypedDigest>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub provenance_digest: Nullable<RecallDigestV2>,
     /// `null` = no authenticated authority claim (AUTH_0).
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub authority_label: Nullable<String>,
 }
 
@@ -280,20 +349,23 @@ pub struct RecallEnvelopeV2Payload {
     /// Required. Must be a stable **opaque** identifier — never a display
     /// name, email address, or other human-readable identity data.
     pub tenant_id: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub workspace_id: Nullable<String>,
     /// Required, and opaque on the same terms as `tenant_id`.
     pub agent_id: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub session_id: Nullable<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub mission_id: Nullable<String>,
     pub run_id: CanonicalUuid,
     /// SHA-256 over the exact UTF-8 query bytes, with no normalization.
-    pub query_digest: TypedDigest,
+    pub query_digest: RecallDigestV2,
     /// The requested cap. This is a *request parameter*, not a result count:
     /// `hits.len()` is the count, and no redundant count field exists that
     /// could contradict it while signed.
     pub limit: u32,
-    pub retrieval_policy_digest: TypedDigest,
-    pub embedding_config_digest: TypedDigest,
+    pub retrieval_policy_digest: RecallDigestV2,
+    pub embedding_config_digest: RecallDigestV2,
     /// Ordered. JSON arrays preserve order under canonicalization; only object
     /// keys are sorted.
     pub hits: Vec<RecallHitV2>,
@@ -310,7 +382,7 @@ pub struct RecallSignatureV2 {
     /// `SHA256(RECALL_SIGNING_DOMAIN_BYTES || canonical(payload))` — the digest
     /// of the *signing bytes*, not of the bare canonical payload, so it
     /// inherits domain separation.
-    pub signed_payload_digest: TypedDigest,
+    pub signed_payload_digest: RecallDigestV2,
     /// Must equal [`RECALL_SIGNING_DOMAIN_LABEL`]. Never caller-selectable.
     pub signing_domain: String,
 }
@@ -330,8 +402,13 @@ pub struct RecallEnvelopeV2 {
 
 /// Serialize `value` to canonical JSON bytes.
 ///
-/// Rules: UTF-8; object keys sorted ascending by raw key **bytes**; array order
-/// preserved; no insignificant whitespace; integers only.
+/// Rules: preserve Unicode scalars without normalization; emit ordinary
+/// non-ASCII, slash, U+2028 and U+2029 directly as UTF-8; escape quote,
+/// backslash and the five short control escapes; encode other U+0000 through
+/// U+001F scalars as lowercase `\u00xx`; sort object keys by raw UTF-8 bytes;
+/// preserve array order; emit no insignificant whitespace; reject floats.
+/// Invalid lone surrogates are rejected by the JSON parser because Rust strings
+/// contain only Unicode scalar values.
 ///
 /// Keys are sorted explicitly here rather than relying on `serde_json::Map`
 /// iteration order. That order depends on serde_json's `preserve_order`
@@ -393,8 +470,31 @@ fn write_canonical(value: &Value, out: &mut Vec<u8>) -> Result<(), RecallError> 
 }
 
 fn write_json_string(value: &str, out: &mut Vec<u8>) {
-    let encoded = serde_json::to_string(value).expect("string serialization cannot fail");
-    out.extend_from_slice(encoded.as_bytes());
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    out.push(b'"');
+    for scalar in value.chars() {
+        match scalar {
+            '"' => out.extend_from_slice(br#"\""#),
+            '\\' => out.extend_from_slice(br#"\\"#),
+            '\u{0008}' => out.extend_from_slice(br#"\b"#),
+            '\u{0009}' => out.extend_from_slice(br#"\t"#),
+            '\u{000a}' => out.extend_from_slice(br#"\n"#),
+            '\u{000c}' => out.extend_from_slice(br#"\f"#),
+            '\u{000d}' => out.extend_from_slice(br#"\r"#),
+            control if control <= '\u{001f}' => {
+                let byte = control as u8;
+                out.extend_from_slice(b"\\u00");
+                out.push(HEX[(byte >> 4) as usize]);
+                out.push(HEX[(byte & 0x0f) as usize]);
+            }
+            ordinary => {
+                let mut encoded = [0_u8; 4];
+                out.extend_from_slice(ordinary.encode_utf8(&mut encoded).as_bytes());
+            }
+        }
+    }
+    out.push(b'"');
 }
 
 // ── Signing bytes and digest ─────────────────────────────────────────────────
@@ -412,20 +512,11 @@ pub fn recall_signing_bytes(payload: &RecallEnvelopeV2Payload) -> Result<Vec<u8>
 /// [`RecallSignatureV2::signed_payload_digest`].
 pub fn recall_signed_payload_digest(
     payload: &RecallEnvelopeV2Payload,
-) -> Result<TypedDigest, RecallError> {
-    Ok(TypedDigest::sha256_public(&recall_signing_bytes(payload)?))
-}
-
-/// Diagnostics only: `SHA256(canonical(payload))`, without the domain prefix.
-///
-/// Provided so a vector file can show both values. This must **never** be put
-/// into a signature envelope — it lacks domain separation.
-pub fn recall_payload_digest_for_diagnostics(
-    payload: &RecallEnvelopeV2Payload,
-) -> Result<TypedDigest, RecallError> {
-    Ok(TypedDigest::sha256_public(&canonical_json_v1_bytes(
-        payload,
-    )?))
+) -> Result<RecallDigestV2, RecallError> {
+    Ok(RecallDigestV2::sha256(
+        &recall_signing_bytes(payload)?,
+        true,
+    ))
 }
 
 // ── Validation ───────────────────────────────────────────────────────────────
@@ -561,8 +652,8 @@ impl RecallEnvelopeV2 {
         let expected = recall_signed_payload_digest(&self.payload)?;
         if self.signature.signed_payload_digest != expected {
             return Err(RecallError::SignedPayloadDigestMismatch {
-                expected: expected.value,
-                found: self.signature.signed_payload_digest.value.clone(),
+                expected: expected.value().to_owned(),
+                found: self.signature.signed_payload_digest.value().to_owned(),
             });
         }
 
@@ -613,17 +704,17 @@ fn require_lowercase_hex(field: &'static str, value: &str) -> Result<(), RecallE
     Ok(())
 }
 
-fn require_sha256_digest(field: &'static str, digest: &TypedDigest) -> Result<(), RecallError> {
-    if digest.algorithm != SHA256_ALGORITHM {
+fn require_sha256_digest(field: &'static str, digest: &RecallDigestV2) -> Result<(), RecallError> {
+    if digest.algorithm() != SHA256_ALGORITHM {
         return Err(RecallError::DigestAlgorithm {
             field,
-            algorithm: digest.algorithm.clone(),
+            algorithm: digest.algorithm().to_owned(),
         });
     }
-    if digest.value.len() != SHA256_HEX_LEN {
+    if digest.value().len() != SHA256_HEX_LEN {
         return Err(RecallError::MalformedHex(field));
     }
-    require_lowercase_hex(field, &digest.value)
+    require_lowercase_hex(field, digest.value())
 }
 
 /// Lowercase-hex helper for building fixtures and test vectors.

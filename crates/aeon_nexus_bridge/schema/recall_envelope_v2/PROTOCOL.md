@@ -65,6 +65,10 @@ it.
 { "algorithm": "sha256", "value": <64 lowercase hex>, "public_recomputable": <bool> }
 ```
 
+This is a closed object: all three members are required, unknown members are
+rejected, and duplicate known members are rejected. `algorithm` accepts only
+the exact lowercase string `sha256`.
+
 ### 1.5 Signature
 
 | Field | Type | Notes |
@@ -94,9 +98,9 @@ implementations agree on the meaning while disagreeing on the digest.
 
 > Implementation note. In Rust this is *not* expressible with `Option<T>`:
 > serde's derive silently maps a missing field to `None`. The reference
-> implementation uses a distinct `Nullable<T>` whose deserializer routes through
-> `deserialize_any`, which serde's missing-field deserializer rejects. Other
-> languages must apply an equivalent explicit presence check.
+> implementation uses a field-level `deserialize_with` function on each
+> `Nullable<T>`, with no `default`. Present values deserialize directly from the
+> original Serde stream. Other languages must apply an equivalent presence check.
 
 ---
 
@@ -131,10 +135,21 @@ described as such.
 2. Object keys are emitted in ascending order of their **raw UTF-8 key bytes**.
 3. Array order is preserved. Arrays are never sorted.
 4. No insignificant whitespace: no space after `:` or `,`, no newlines.
-5. Strings are UTF-8, escaped per RFC 8259.
-6. **Numbers MUST be integers.** A floating-point value anywhere in the payload
+5. Strings preserve the exact Unicode scalar sequence. No normalization is
+   performed. Ordinary non-ASCII scalars are emitted directly as UTF-8.
+6. String escaping is exact:
+   - quote is `\"`;
+   - backslash is `\\`;
+   - U+0008, U+0009, U+000A, U+000C, and U+000D are `\b`, `\t`, `\n`, `\f`,
+     and `\r`;
+   - every other U+0000 through U+001F scalar is lowercase `\u00xx`;
+   - slash is not escaped;
+   - U+2028 and U+2029 are emitted directly as UTF-8.
+7. A lone UTF-16 surrogate is not a Unicode scalar and MUST be rejected by the
+   JSON parser before canonicalization.
+8. **Numbers MUST be integers.** A floating-point value anywhere in the payload
    is an error, not a rounding opportunity.
-7. Duplicate object keys MUST be rejected before canonicalization.
+9. Duplicate object keys MUST be rejected before canonicalization.
 
 Key ordering MUST be performed explicitly, not inherited from a language's map
 type. (In Rust, `serde_json::Map` ordering depends on the `preserve_order`
@@ -149,6 +164,10 @@ including when both occurrences are *known* fields. Rejecting only unknown
 fields is insufficient. Note that parsing into a generic JSON value type
 typically keeps the last occurrence silently — the check must happen during
 strict deserialization.
+
+The rule applies recursively to the payload, every hit, every digest, the
+signature object, and the outer envelope. Nullable values do not create an
+exception: a present object is deserialized directly into its strict target type.
 
 ---
 
@@ -357,6 +376,7 @@ standard `sha256sum` format, paths relative to the crate root, covering:
 - `vectors/recall_envelope_v2/payload.json`
 - `vectors/recall_envelope_v2/vector.json`
 - `vectors/recall_envelope_v2/envelope.json`
+- `vectors/recall_envelope_v2/canonicalization_strings.json`
 
 They are deliberately **not** duplicated in this document. A second copy would
 drift, and a stale hash in a normative spec is worse than none. The test

@@ -4,7 +4,7 @@
 
 use aeon_nexus_bridge::v2::{
     recall_signed_payload_digest, recall_signing_bytes, to_lowercase_hex, CanonicalUuid, Nullable,
-    RecallEnvelopeV2, RecallEnvelopeV2Payload, RecallHitV2, RecallSignatureV2,
+    RecallDigestV2, RecallEnvelopeV2, RecallEnvelopeV2Payload, RecallHitV2, RecallSignatureV2,
     RECALL_CANONICALIZATION_VERSION, RECALL_MAX_LIMIT, RECALL_MIN_LIMIT, RECALL_PROTOCOL_VERSION,
     RECALL_SIGNATURE_ALGORITHM, RECALL_SIGNATURE_HEX_LEN, RECALL_SIGNING_DOMAIN_LABEL,
 };
@@ -17,8 +17,8 @@ const REQUEST_ID: &str = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const RUN_ID: &str = "9f1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
 const ED25519_SEED: [u8; 32] = [0x42; 32];
 
-fn digest_of(bytes: &[u8]) -> TypedDigest {
-    TypedDigest::sha256_public(bytes)
+fn digest_of(bytes: &[u8]) -> RecallDigestV2 {
+    RecallDigestV2::sha256(bytes, true)
 }
 
 fn base_payload() -> RecallEnvelopeV2Payload {
@@ -601,18 +601,24 @@ fn signature_must_be_lowercase_hex_of_exact_ed25519_length() {
 
 #[test]
 fn signed_payload_digest_must_be_lowercase_sha256_hex() {
-    let mut env = envelope(base_payload());
-    env.signature.signed_payload_digest.algorithm = "hmac-sha256".to_owned();
-    assert!(env.validate().is_err(), "digest algorithm must be sha256");
+    let mut value = serde_json::to_value(envelope(base_payload())).unwrap();
+    value["signature"]["signed_payload_digest"]["algorithm"] = Value::from("hmac-sha256");
+    assert!(
+        serde_json::from_value::<RecallEnvelopeV2>(value).is_err(),
+        "digest algorithm must be sha256"
+    );
 
-    let mut env = envelope(base_payload());
-    env.signature.signed_payload_digest.value =
-        env.signature.signed_payload_digest.value.to_uppercase();
-    assert!(env.validate().is_err(), "uppercase digest must be rejected");
+    let mut value = serde_json::to_value(envelope(base_payload())).unwrap();
+    let uppercase = value["signature"]["signed_payload_digest"]["value"]
+        .as_str()
+        .unwrap()
+        .to_uppercase();
+    value["signature"]["signed_payload_digest"]["value"] = Value::from(uppercase);
+    assert!(serde_json::from_value::<RecallEnvelopeV2>(value).is_err());
 
-    let mut env = envelope(base_payload());
-    env.signature.signed_payload_digest.value = "ab".repeat(31);
-    assert!(env.validate().is_err(), "62-char digest must be rejected");
+    let mut value = serde_json::to_value(envelope(base_payload())).unwrap();
+    value["signature"]["signed_payload_digest"]["value"] = Value::from("ab".repeat(31));
+    assert!(serde_json::from_value::<RecallEnvelopeV2>(value).is_err());
 }
 
 #[test]
@@ -625,8 +631,8 @@ fn signed_payload_digest_is_recomputed_from_full_signing_bytes() {
 
     // Substituting the digest of the bare canonical payload must fail.
     let mut tampered = envelope(payload.clone());
-    tampered.signature.signed_payload_digest =
-        aeon_nexus_bridge::v2::recall_payload_digest_for_diagnostics(&payload).expect("digest");
+    let canonical = aeon_nexus_bridge::v2::canonical_json_v1_bytes(&payload).expect("canonical");
+    tampered.signature.signed_payload_digest = RecallDigestV2::sha256(&canonical, true);
     assert!(
         tampered.validate().is_err(),
         "the un-domain-separated payload digest must not be accepted"
@@ -865,7 +871,7 @@ fn envelope_fixture_digest_matches_sha256_of_signing_bytes() {
     let env = checked_in_envelope();
     let signing = recall_signing_bytes(&env.payload).expect("signing bytes");
     assert_eq!(
-        env.signature.signed_payload_digest.value,
+        env.signature.signed_payload_digest.value(),
         aeon_nexus_bridge::v2::sha256_hex(&signing)
     );
     assert_eq!(
@@ -955,8 +961,8 @@ fn artifact_manifest_matches_checked_in_files() {
     }
 
     assert_eq!(
-        checked, 5,
-        "manifest must cover exactly the schema, PROTOCOL.md and the three \
+        checked, 6,
+        "manifest must cover exactly the schema, PROTOCOL.md and the four \
          vector fixtures -- and must never list itself"
     );
     assert!(
@@ -996,6 +1002,7 @@ fn artifact_manifest_detects_a_modified_file() {
         "vectors/recall_envelope_v2/payload.json",
         "vectors/recall_envelope_v2/vector.json",
         "vectors/recall_envelope_v2/envelope.json",
+        "vectors/recall_envelope_v2/canonicalization_strings.json",
     ] {
         assert!(manifest.contains(relative), "manifest must list {relative}");
     }
@@ -1051,7 +1058,8 @@ fn canonical_values_are_independent_of_map_ordering() {
         "signing bytes changed"
     );
     assert_eq!(
-        digest.value, "f3f326513b66184fbd349b62696373fe469659bda379fb3b773b032b8f85d71a",
+        digest.value(),
+        "f3f326513b66184fbd349b62696373fe469659bda379fb3b773b032b8f85d71a",
         "signed_payload_digest changed"
     );
     assert_eq!(
@@ -1133,6 +1141,58 @@ fn canonical_string_escaping_is_frozen() {
 
 #[test]
 fn invalid_lone_surrogate_is_rejected_before_canonicalization() {
-    assert!(serde_json::from_str::<Value>(r#"\"\uD800\""#).is_err());
-    assert!(serde_json::from_str::<Value>(r#"\"\uDC00\""#).is_err());
+    assert!(serde_json::from_str::<Value>(r#""\uD800""#).is_err());
+    assert!(serde_json::from_str::<Value>(r#""\uDC00""#).is_err());
+}
+
+#[test]
+fn every_control_character_uses_the_frozen_escape() {
+    for codepoint in 0_u32..=0x1f {
+        let scalar = char::from_u32(codepoint).unwrap().to_string();
+        let actual = aeon_nexus_bridge::v2::canonical_json_v1_bytes(&scalar).unwrap();
+        let expected = match codepoint {
+            0x08 => r#""\b""#.to_owned(),
+            0x09 => r#""\t""#.to_owned(),
+            0x0a => r#""\n""#.to_owned(),
+            0x0c => r#""\f""#.to_owned(),
+            0x0d => r#""\r""#.to_owned(),
+            other => format!(r#""\u00{other:02x}""#),
+        };
+        assert_eq!(
+            actual,
+            expected.as_bytes(),
+            "wrong escape for U+{codepoint:04X}"
+        );
+    }
+}
+
+#[test]
+fn language_neutral_canonicalization_string_vector_matches() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/vectors/recall_envelope_v2/canonicalization_strings.json"
+    );
+    let raw = std::fs::read_to_string(path).expect("canonicalization vector present");
+    let vector: Value = serde_json::from_str(&raw).expect("canonicalization vector is JSON");
+    let cases = vector["cases"].as_array().expect("cases array");
+
+    let mut encodings = std::collections::BTreeMap::new();
+    for case in cases {
+        let name = case["name"].as_str().expect("case name");
+        let value = case["value"].as_str().expect("case value");
+        let expected = case["canonical_utf8_hex"].as_str().expect("canonical hex");
+        let actual = aeon_nexus_bridge::v2::canonical_json_v1_bytes(value).unwrap();
+        assert_eq!(to_lowercase_hex(&actual), expected, "case {name}");
+        encodings.insert(name, actual);
+    }
+
+    for pair in vector["distinct_pairs"].as_array().expect("distinct pairs") {
+        let left = pair["left"].as_str().expect("left case");
+        let right = pair["right"].as_str().expect("right case");
+        assert_ne!(
+            encodings.get(left).expect("left encoding"),
+            encodings.get(right).expect("right encoding"),
+            "{left} and {right} must remain byte-distinct"
+        );
+    }
 }

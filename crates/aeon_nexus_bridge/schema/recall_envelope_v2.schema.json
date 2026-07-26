@@ -60,7 +60,7 @@
           "description": "Zero-based and equal to this hit's index in hits."
         },
         "score_micros": {
-          "type": ["integer", "null"],
+          "oneOf": [{ "type": "integer" }, { "type": "null" }],
           "description": "Fixed-point micros. null means no score; it MUST NOT be replaced with 0."
         },
         "provenance_digest": {
@@ -68,8 +68,10 @@
           "description": "null = no authenticated provenance claim."
         },
         "authority_label": {
-          "type": ["string", "null"],
-          "minLength": 1,
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ],
           "description": "null = no authenticated authority claim (AUTH_0)."
         }
       }

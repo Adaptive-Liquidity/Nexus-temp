@@ -8,13 +8,13 @@
 use std::collections::BTreeSet;
 
 use aeon_nexus_bridge::v2::{
-    canonical_json_v1_bytes, recall_payload_digest_for_diagnostics, recall_signed_payload_digest,
-    recall_signing_bytes, sha256_hex, to_lowercase_hex, Nullable, RecallEnvelopeV2,
-    RecallEnvelopeV2Payload, RecallHitV2, RecallSignatureV2, RECALL_CANONICALIZATION_VERSION,
-    RECALL_MAX_HITS, RECALL_MAX_TTL_MS, RECALL_PROTOCOL_VERSION, RECALL_SIGNING_DOMAIN_BYTES,
+    canonical_json_v1_bytes, recall_signed_payload_digest, recall_signing_bytes, sha256_hex,
+    to_lowercase_hex, Nullable, RecallDigestV2, RecallEnvelopeV2, RecallEnvelopeV2Payload,
+    RecallHitV2, RecallSignatureV2, RECALL_CANONICALIZATION_VERSION, RECALL_MAX_HITS,
+    RECALL_MAX_TTL_MS, RECALL_PROTOCOL_VERSION, RECALL_SIGNING_DOMAIN_BYTES,
     RECALL_SIGNING_DOMAIN_LABEL,
 };
-use aeon_nexus_bridge::{MemoryScore, TypedDigest};
+use aeon_nexus_bridge::MemoryScore;
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::Value;
 
@@ -29,8 +29,8 @@ const ED25519_SEED: [u8; 32] = [0x42; 32];
 const KEY_ID: &str = "test-key-0001";
 const ALGORITHM: &str = "ed25519";
 
-fn digest_of(bytes: &[u8]) -> TypedDigest {
-    TypedDigest::sha256_public(bytes)
+fn digest_of(bytes: &[u8]) -> RecallDigestV2 {
+    RecallDigestV2::sha256(bytes, true)
 }
 
 /// The normative fixture payload.
@@ -146,14 +146,9 @@ fn emit_vector() {
         "signed_payload_digest     = {}",
         recall_signed_payload_digest(&payload)
             .expect("digest")
-            .value
+            .value()
     );
-    println!(
-        "payload_digest_diagnostic = {}",
-        recall_payload_digest_for_diagnostics(&payload)
-            .expect("digest")
-            .value
-    );
+    println!("payload_digest_diagnostic = {}", sha256_hex(&canonical));
     println!(
         "ed25519_seed_hex          = {}",
         to_lowercase_hex(&ED25519_SEED)
@@ -205,13 +200,13 @@ fn signed_payload_digest_is_sha256_of_signing_bytes_not_of_payload() {
     let signing = recall_signing_bytes(&payload).expect("signing bytes");
     let digest = recall_signed_payload_digest(&payload).expect("digest");
 
-    assert_eq!(digest.value, sha256_hex(&signing));
-    assert_eq!(digest.value, vector_str("signed_payload_digest"));
+    assert_eq!(digest.value(), sha256_hex(&signing));
+    assert_eq!(digest.value(), vector_str("signed_payload_digest"));
 
     // ...and is emphatically NOT the digest of the bare canonical payload.
-    let diagnostic = recall_payload_digest_for_diagnostics(&payload).expect("digest");
-    assert_ne!(digest.value, diagnostic.value);
-    assert_eq!(diagnostic.value, vector_str("payload_digest_diagnostic"));
+    let diagnostic = sha256_hex(&canonical_json_v1_bytes(&payload).expect("canonical bytes"));
+    assert_ne!(digest.value(), diagnostic);
+    assert_eq!(diagnostic, vector_str("payload_digest_diagnostic"));
 }
 
 #[test]
@@ -426,8 +421,8 @@ fn reserved_field_population_changes_signed_bytes() {
     assert_ne!(
         recall_signed_payload_digest(&with_provenance)
             .expect("digest")
-            .value,
-        base.value
+            .value(),
+        base.value()
     );
 
     let mut with_authority = fixture_payload();
@@ -435,8 +430,8 @@ fn reserved_field_population_changes_signed_bytes() {
     assert_ne!(
         recall_signed_payload_digest(&with_authority)
             .expect("digest")
-            .value,
-        base.value
+            .value(),
+        base.value()
     );
 }
 

@@ -6,6 +6,9 @@ description = "Shared AEON-IQ/Nexus memory evidence wire types and digest helper
 license = "MIT"
 publish = false
 
+[features]
+preserve-order-conformance = ["serde_json/preserve_order"]
+
 [dependencies]
 hmac = "0.12"
 serde = { version = "1.0", features = ["derive"] }
