@@ -190,13 +190,15 @@ jobs:
         uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: cargo-codspeed
-      - uses: CodSpeedHQ/action@c8ffb9ced3005b12a98162811dcf60cf520da534 # pinned SHA
+      - name: Build CodSpeed benchmark
+        run: |
+          cargo codspeed build --bench nexus_validation \
+            --features bench-cold-start,bench-snapshot-create,bench-snapshot-rollback,bench-execute-tool,bench-execute-real-memory,bench-integrated
+      - name: Run CodSpeed benchmark
+        uses: CodSpeedHQ/action@c8ffb9ced3005b12a98162811dcf60cf520da534 # pinned SHA
         with:
           mode: simulation,memory
-          run: |
-            cargo codspeed build --bench nexus_validation \
-              --features bench-cold-start,bench-snapshot-create,bench-snapshot-rollback,bench-execute-tool,bench-execute-real-memory,bench-integrated
-            cargo codspeed run --bench nexus_validation
+          run: cargo codspeed run --bench nexus_validation
 
   codspeed-walltime:
     name: "Criterion → CodSpeed.io (bare-metal walltime)"
