@@ -33,8 +33,8 @@ it.
 | `canonicalization_version` | string | exactly `aeon-canonical-json-v1` |
 | `request_id` | canonical UUID | §3 |
 | `nonce` | string | 64 lowercase hex chars = 32 random bytes |
-| `issued_at_unix_ms` | integer | ≥ 0, milliseconds since Unix epoch |
-| `expires_at_unix_ms` | integer | > `issued_at_unix_ms` |
+| `issued_at_unix_ms` | signed 64-bit integer | ≥ 0, milliseconds since Unix epoch |
+| `expires_at_unix_ms` | signed 64-bit integer | > `issued_at_unix_ms` |
 | `tenant_id` | opaque id | required, non-empty, §10 |
 | `workspace_id` | opaque id \| null | nullable |
 | `agent_id` | opaque id | required, non-empty, §10 |
@@ -275,7 +275,7 @@ MUST NOT accept an `algorithm` other than `ed25519`.
 | --- | --- |
 | versions | `protocol_version` and `canonicalization_version` exact match |
 | nonce | exactly 64 lowercase hex chars |
-| time | `issued_at_unix_ms ≥ 0`; `expires_at_unix_ms > issued_at_unix_ms` |
+| time | 0 <= issued_at_unix_ms < expires_at_unix_ms <= 9223372036854775807 |
 | TTL | `expires_at − issued_at ≤ 120000 ms`; default 30000 ms |
 | limit | `1 ≤ limit ≤ 100` |
 | hits | `0 ≤ len(hits) ≤ 100` and `len(hits) ≤ limit` |

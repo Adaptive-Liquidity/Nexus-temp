@@ -507,6 +507,44 @@ fn schema_bounds_score_micros_to_the_signed_64_bit_wire_range() {
 }
 
 #[test]
+fn schema_bounds_timestamps_to_the_signed_64_bit_wire_range() {
+    let schema_json: Value =
+        serde_json::from_str(include_str!("../schema/recall_envelope_v2.schema.json"))
+            .expect("schema JSON parses");
+    let properties = &schema_json["$defs"]["payload"]["properties"];
+
+    for (field, minimum) in [("issued_at_unix_ms", 0_i64), ("expires_at_unix_ms", 1_i64)] {
+        assert_eq!(properties[field]["minimum"], Value::from(minimum));
+        assert_eq!(properties[field]["maximum"], Value::from(i64::MAX));
+
+        let mut boundary = valid_envelope_value();
+        boundary["payload"][field] = Value::from(i64::MAX);
+        assert!(
+            schema_accepts(&boundary),
+            "{field} at i64::MAX must satisfy the schema"
+        );
+        serde_json::from_value::<RecallEnvelopeV2>(boundary)
+            .expect("the Rust wire type must deserialize i64::MAX");
+
+        let mut above_max = valid_envelope_value();
+        above_max["payload"][field] =
+            serde_json::from_str("9223372036854777856").expect("valid JSON integer");
+        assert!(
+            !schema_accepts(&above_max),
+            "the schema must reject {field} above i64::MAX"
+        );
+
+        let mut exactly_one_above = valid_envelope_value();
+        exactly_one_above["payload"][field] =
+            serde_json::from_str("9223372036854775808").expect("valid JSON integer");
+        assert!(
+            serde_json::from_value::<RecallEnvelopeV2>(exactly_one_above).is_err(),
+            "the Rust wire type must reject {field} above i64::MAX"
+        );
+    }
+}
+
+#[test]
 fn schema_rejects_unknown_fields() {
     let mut value = valid_envelope_value();
     value["payload"]
