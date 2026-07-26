@@ -470,6 +470,43 @@ fn schema_accepts_explicit_null() {
 }
 
 #[test]
+fn schema_bounds_score_micros_to_the_signed_64_bit_wire_range() {
+    for boundary in [i64::MIN, i64::MAX] {
+        let mut value = valid_envelope_value();
+        value["payload"]["hits"][0]["score_micros"] = Value::from(boundary);
+        assert!(
+            schema_accepts(&value),
+            "score_micros boundary {boundary} must satisfy the schema"
+        );
+        serde_json::from_value::<RecallEnvelopeV2>(value)
+            .expect("the Rust wire type must accept both signed 64-bit boundaries");
+    }
+
+    let mut above_max = valid_envelope_value();
+    above_max["payload"]["hits"][0]["score_micros"] =
+        serde_json::from_str("9223372036854777856").expect("valid JSON integer");
+    assert!(
+        !schema_accepts(&above_max),
+        "the schema must reject score_micros above i64::MAX"
+    );
+
+    let mut exactly_one_above = valid_envelope_value();
+    exactly_one_above["payload"]["hits"][0]["score_micros"] =
+        serde_json::from_str("9223372036854775808").expect("valid JSON integer");
+    assert!(
+        serde_json::from_value::<RecallEnvelopeV2>(exactly_one_above).is_err(),
+        "the Rust wire type must reject score_micros above i64::MAX"
+    );
+
+    let schema_json: Value =
+        serde_json::from_str(include_str!("../schema/recall_envelope_v2.schema.json"))
+            .expect("schema JSON parses");
+    let integer_branch = &schema_json["$defs"]["hit"]["properties"]["score_micros"]["oneOf"][0];
+    assert_eq!(integer_branch["minimum"], Value::from(i64::MIN));
+    assert_eq!(integer_branch["maximum"], Value::from(i64::MAX));
+}
+
+#[test]
 fn schema_rejects_unknown_fields() {
     let mut value = valid_envelope_value();
     value["payload"]

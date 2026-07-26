@@ -60,8 +60,15 @@
           "description": "Zero-based and equal to this hit's index in hits."
         },
         "score_micros": {
-          "oneOf": [{ "type": "integer" }, { "type": "null" }],
-          "description": "Fixed-point micros. null means no score; it MUST NOT be replaced with 0."
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807
+            },
+            { "type": "null" }
+          ],
+          "description": "Signed 64-bit fixed-point micros. null means no score; it MUST NOT be replaced with 0."
         },
         "provenance_digest": {
           "oneOf": [{ "$ref": "#/$defs/sha256Digest" }, { "type": "null" }],

@@ -55,7 +55,7 @@ it.
 | `memory_version_id` | opaque id | non-empty, unique within the envelope |
 | `content_digest` | digest | SHA-256 over the memory content bytes |
 | `rank` | integer | zero-based; equals the hit's array index |
-| `score_micros` | integer \| null | fixed point; §11 |
+| `score_micros` | signed 64-bit integer \| null | fixed point; §11 |
 | `provenance_digest` | digest \| null | §12 |
 | `authority_label` | string \| null | §12 |
 
@@ -310,7 +310,9 @@ privacy posture is preserved.
 
 ## 11. Scores
 
-`score_micros` is a fixed-point integer in millionths. `0.875` is `875000`.
+`score_micros` is a signed 64-bit fixed-point integer in millionths, inclusive
+from `-9223372036854775808` through `9223372036854775807`. Values outside this
+range MUST be rejected. For example, `0.875` is `875000`.
 
 `null` means **no score**. It MUST NOT be replaced with `0`, and no
 floating-point value may enter canonical bytes.
