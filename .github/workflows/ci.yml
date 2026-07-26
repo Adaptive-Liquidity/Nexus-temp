@@ -15,15 +15,19 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "dashboard/**"
-      - "**/*.md"
+    paths:
+      - "**"
+      - "!docs/**"
+      - "!dashboard/**"
+      - "!**/*.md"
+      - "crates/aeon_nexus_bridge/schema/recall_envelope_v2/PROTOCOL.md"
   pull_request:
-    paths-ignore:
-      - "docs/**"
-      - "dashboard/**"
-      - "**/*.md"
+    paths:
+      - "**"
+      - "!docs/**"
+      - "!dashboard/**"
+      - "!**/*.md"
+      - "crates/aeon_nexus_bridge/schema/recall_envelope_v2/PROTOCOL.md"
 
 permissions:
   contents: read
