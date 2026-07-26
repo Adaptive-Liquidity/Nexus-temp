@@ -245,7 +245,7 @@ jobs:
           echo "Confirmed: the tenant-registry test executed against the live database."
 
   dockerfile-lint:
-    name: publish Dockerfile sanity check
+    name: Nexus image build (no push)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -264,6 +264,8 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Lint Dockerfile syntax (no build)
         run: docker buildx build --file docker/Dockerfile.nexus --check .
+      - name: Build final Nexus image (no push)
+        run: docker buildx build --file docker/Dockerfile.nexus --tag nexus:ci --load .
 
   # The agentd release fail-closed auth gate is selected by
   # #[cfg(not(debug_assertions))]. Every other job here builds debug, where that arm
