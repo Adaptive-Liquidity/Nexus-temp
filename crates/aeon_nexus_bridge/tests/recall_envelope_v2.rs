@@ -206,7 +206,32 @@ fn signed_payload_digest_is_sha256_of_signing_bytes_not_of_payload() {
     // ...and is emphatically NOT the digest of the bare canonical payload.
     let diagnostic = sha256_hex(&canonical_json_v1_bytes(&payload).expect("canonical bytes"));
     assert_ne!(digest.value(), diagnostic);
+    assert_eq!(diagnostic, vector_str("canonical_sha256"));
     assert_eq!(diagnostic, vector_str("payload_digest_diagnostic"));
+}
+
+#[test]
+fn canonical_bytes_reject_all_floats_before_json_value_conversion() {
+    for value in [0.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(
+            canonical_json_v1_bytes(&value).is_err(),
+            "float {value} must not be coerced into canonical JSON"
+        );
+        assert!(
+            canonical_json_v1_bytes(&[value]).is_err(),
+            "nested float {value} must not be coerced into canonical JSON"
+        );
+    }
+
+    for value in [0.5_f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert!(canonical_json_v1_bytes(&value).is_err());
+        assert!(canonical_json_v1_bytes(&[value]).is_err());
+    }
+
+    assert_eq!(
+        canonical_json_v1_bytes(&Option::<u8>::None).expect("real null remains valid"),
+        b"null"
+    );
 }
 
 #[test]

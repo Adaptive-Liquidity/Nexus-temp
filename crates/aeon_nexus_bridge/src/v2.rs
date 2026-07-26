@@ -27,6 +27,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+mod canonical_preflight;
+
 use crate::{MemoryScore, SHA256_ALGORITHM};
 
 // ── Frozen constants ─────────────────────────────────────────────────────────
@@ -421,6 +423,8 @@ pub fn canonical_json_v1_bytes<T>(value: &T) -> Result<Vec<u8>, RecallError>
 where
     T: Serialize + ?Sized,
 {
+    canonical_preflight::reject_floats(value)?;
+
     let value = serde_json::to_value(value).map_err(RecallError::Serialization)?;
     let mut out = Vec::new();
     write_canonical(&value, &mut out)?;
