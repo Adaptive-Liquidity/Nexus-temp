@@ -136,6 +136,12 @@ fn payload_json_string() -> String {
     serde_json::to_string(&base_payload()).expect("serialize")
 }
 
+fn envelope_json_with_populated_provenance() -> String {
+    let mut payload = base_payload();
+    payload.hits[0].provenance_digest = Nullable::some(digest_of(b"provenance"));
+    serde_json::to_string(&envelope(payload)).expect("serialize")
+}
+
 /// Insert a second copy of `"key":<value>` immediately after the opening brace
 /// of the object starting at `object_start`.
 fn duplicate_key_at(json: &str, object_start: usize, key: &str, value: &str) -> String {
@@ -145,6 +151,43 @@ fn duplicate_key_at(json: &str, object_start: usize, key: &str, value: &str) -> 
     out.push_str(&json[object_start + 1..]);
     out
 }
+
+fn digest_object_start(json: &str, field: &str) -> usize {
+    let marker = format!("\"{field}\":{{");
+    json.find(&marker).expect("digest field present") + marker.len() - 1
+}
+
+fn digest_object_mut<'a>(
+    value: &'a mut Value,
+    field: &str,
+) -> &'a mut serde_json::Map<String, Value> {
+    fn find<'a>(
+        value: &'a mut Value,
+        field: &str,
+    ) -> Option<&'a mut serde_json::Map<String, Value>> {
+        match value {
+            Value::Object(object) => {
+                if object.get(field).is_some_and(Value::is_object) {
+                    return object.get_mut(field).and_then(Value::as_object_mut);
+                }
+                object.values_mut().find_map(|child| find(child, field))
+            }
+            Value::Array(items) => items.iter_mut().find_map(|child| find(child, field)),
+            _ => None,
+        }
+    }
+
+    find(value, field).expect("digest object present")
+}
+
+const DIGEST_FIELDS: [&str; 6] = [
+    "provenance_digest",
+    "query_digest",
+    "retrieval_policy_digest",
+    "embedding_config_digest",
+    "content_digest",
+    "signed_payload_digest",
+];
 
 #[test]
 fn duplicate_top_level_payload_key_is_rejected() {
@@ -204,6 +247,127 @@ fn duplicate_signature_envelope_key_is_rejected() {
         error.to_string().contains("duplicate field"),
         "expected a duplicate-field error, got: {error}"
     );
+}
+
+#[test]
+fn nullable_digest_rejects_duplicate_and_unknown_members() {
+    let json = envelope_json_with_populated_provenance();
+    let object_start = digest_object_start(&json, "provenance_digest");
+
+    let duplicate = duplicate_key_at(&json, object_start, "algorithm", "\"sha256\"");
+    let error = serde_json::from_str::<RecallEnvelopeV2>(&duplicate)
+        .expect_err("duplicate member inside nullable digest must be rejected");
+    assert!(
+        error.to_string().contains("duplicate field"),
+        "expected a duplicate-field error, got: {error}"
+    );
+
+    let unknown = duplicate_key_at(&json, object_start, "attacker", "true");
+    serde_json::from_str::<RecallEnvelopeV2>(&unknown)
+        .expect_err("unknown member inside nullable digest must be rejected");
+}
+
+#[test]
+fn every_v2_digest_rejects_duplicate_known_and_unknown_members() {
+    for field in DIGEST_FIELDS {
+        for (member, value) in [
+            ("algorithm", "\"sha256\""),
+            (
+                "value",
+                "\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"",
+            ),
+            ("public_recomputable", "false"),
+        ] {
+            let json = envelope_json_with_populated_provenance();
+            let raw = duplicate_key_at(&json, digest_object_start(&json, field), member, value);
+            let error = serde_json::from_str::<RecallEnvelopeV2>(&raw).expect_err(
+                "every duplicate known member in every nested V2 digest must be rejected",
+            );
+            assert!(
+                error.to_string().contains("duplicate field"),
+                "{field}.{member} returned the wrong error: {error}"
+            );
+        }
+
+        let json = envelope_json_with_populated_provenance();
+        let raw = duplicate_key_at(
+            &json,
+            digest_object_start(&json, field),
+            "unexpected",
+            "\"value\"",
+        );
+        assert!(
+            serde_json::from_str::<RecallEnvelopeV2>(&raw).is_err(),
+            "{field} accepted an unknown member"
+        );
+    }
+}
+
+#[test]
+fn every_v2_digest_rejects_invalid_or_incomplete_wire_values() {
+    for field in DIGEST_FIELDS {
+        for invalid_algorithm in ["SHA256", "sha-256", "hmac-sha256", ""] {
+            let mut value: Value =
+                serde_json::from_str(&envelope_json_with_populated_provenance()).unwrap();
+            digest_object_mut(&mut value, field)["algorithm"] = Value::from(invalid_algorithm);
+            let raw = serde_json::to_string(&value).unwrap();
+            assert!(
+                serde_json::from_str::<RecallEnvelopeV2>(&raw).is_err(),
+                "{field} accepted invalid algorithm {invalid_algorithm:?}"
+            );
+        }
+
+        for invalid_value in [
+            "0",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+            "00000000000000000000000000000000000000000000000000000000000000000",
+        ] {
+            let mut value: Value =
+                serde_json::from_str(&envelope_json_with_populated_provenance()).unwrap();
+            digest_object_mut(&mut value, field)["value"] = Value::from(invalid_value);
+            let raw = serde_json::to_string(&value).unwrap();
+            assert!(
+                serde_json::from_str::<RecallEnvelopeV2>(&raw).is_err(),
+                "{field} accepted invalid digest value"
+            );
+        }
+
+        for missing in ["algorithm", "value", "public_recomputable"] {
+            let mut value: Value =
+                serde_json::from_str(&envelope_json_with_populated_provenance()).unwrap();
+            digest_object_mut(&mut value, field).remove(missing);
+            let raw = serde_json::to_string(&value).unwrap();
+            assert!(
+                serde_json::from_str::<RecallEnvelopeV2>(&raw).is_err(),
+                "{field} accepted missing member {missing}"
+            );
+        }
+
+        let mut value: Value =
+            serde_json::from_str(&envelope_json_with_populated_provenance()).unwrap();
+        digest_object_mut(&mut value, field)["public_recomputable"] = Value::from("true");
+        let raw = serde_json::to_string(&value).unwrap();
+        assert!(
+            serde_json::from_str::<RecallEnvelopeV2>(&raw).is_err(),
+            "{field} accepted a non-boolean flag"
+        );
+    }
+}
+
+#[test]
+fn nullable_digest_accepts_null_and_a_populated_object() {
+    let null_json = serde_json::to_string(&envelope(base_payload())).unwrap();
+    let null_parsed: RecallEnvelopeV2 = serde_json::from_str(&null_json).expect("null accepted");
+    assert!(null_parsed.payload.hits[0].provenance_digest.is_null());
+
+    let populated_json = envelope_json_with_populated_provenance();
+    let populated: RecallEnvelopeV2 =
+        serde_json::from_str(&populated_json).expect("populated digest accepted");
+    assert!(populated.payload.hits[0]
+        .provenance_digest
+        .as_option()
+        .is_some());
 }
 
 /// Documents *why* the tests above pass, so the guarantee is not accidental.
@@ -924,4 +1088,51 @@ fn envelope_fixture_reserializes_byte_exactly() {
         reserialized, expected,
         "envelope.json must round-trip byte-exactly"
     );
+}
+
+#[test]
+fn canonical_string_escaping_is_frozen() {
+    let input = serde_json::json!({
+        "composed": "\u{00e9}",
+        "decomposed": "e\u{0301}",
+        "emoji": "\u{1f600}",
+        "quote": "\"",
+        "backslash": "\\",
+        "newline": "\n",
+        "tab": "\t",
+        "control": "\u{0001}",
+        "slash": "/",
+        "line_separator": "\u{2028}",
+        "paragraph_separator": "\u{2029}"
+    });
+    let actual = aeon_nexus_bridge::v2::canonical_json_v1_bytes(&input).unwrap();
+    let expected = concat!(
+        "{\"backslash\":\"\\\\\",\"composed\":\"",
+        "\u{00e9}",
+        "\",\"control\":\"\\u0001\",\"decomposed\":\"e",
+        "\u{0301}",
+        "\",\"emoji\":\"",
+        "\u{1f600}",
+        "\",\"line_separator\":\"",
+        "\u{2028}",
+        "\",\"newline\":\"\\n\",\"paragraph_separator\":\"",
+        "\u{2029}",
+        "\",\"quote\":\"\\\"\",\"slash\":\"/\",\"tab\":\"\\t\"}"
+    );
+    assert_eq!(actual, expected.as_bytes());
+
+    let composed =
+        aeon_nexus_bridge::v2::canonical_json_v1_bytes(&serde_json::json!("\u{00e9}")).unwrap();
+    let decomposed =
+        aeon_nexus_bridge::v2::canonical_json_v1_bytes(&serde_json::json!("e\u{0301}")).unwrap();
+    assert_ne!(
+        composed, decomposed,
+        "canonicalization must not normalize Unicode"
+    );
+}
+
+#[test]
+fn invalid_lone_surrogate_is_rejected_before_canonicalization() {
+    assert!(serde_json::from_str::<Value>(r#"\"\uD800\""#).is_err());
+    assert!(serde_json::from_str::<Value>(r#"\"\uDC00\""#).is_err());
 }
