@@ -1,7 +1,7 @@
 //! RecallEnvelopeV2 (S0.1) conformance tests.
 //!
 //! The checked-in vector under `vectors/recall_envelope_v2/` is the normative
-//! artifact: AEON-IQ vendors it in S0.2 and must reproduce it byte for byte.
+//! artifact: AEON-IQ vendors it in S0.1b and must reproduce it byte for byte.
 //! These tests prove the Rust implementation agrees with it, and that every
 //! rule in the contract fails closed.
 

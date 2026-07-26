@@ -2,7 +2,7 @@
 //!
 //! This module defines wire shape, canonical bytes, signing bytes and strict
 //! validation. It deliberately does **not** sign or verify: producing and
-//! checking Ed25519 signatures is S0.2/S0.3 work. The only place a real
+//! checking Ed25519 signatures is S0.1b/S0.1c work. The only place a real
 //! signature appears is the checked-in test vector.
 //!
 //! V1 (`crate::MemoryEvidence`) is untouched, undeprecated, and there is no
@@ -14,7 +14,7 @@
 //! The payload carries a `nonce` and an `issued_at`/`expires_at` window, and
 //! both are covered by the signature. This module validates their *shape* only.
 //! It does not track nonce reuse and does not compare timestamps to a clock —
-//! that is a verifier concern (S0.3). Shape validity here is necessary for
+//! that is a verifier concern (S0.1c). Shape validity here is necessary for
 //! replay resistance, not sufficient for it.
 
 use std::collections::BTreeSet;
@@ -529,7 +529,7 @@ impl RecallEnvelopeV2Payload {
     /// Validate payload shape. Fails closed on every rule.
     ///
     /// Does not consult a clock: `issued_at`/`expires_at` are checked for
-    /// internal consistency and TTL bound only. Skew is verifier policy (S0.3).
+    /// internal consistency and TTL bound only. Skew is verifier policy (S0.1c).
     pub fn validate(&self) -> Result<(), RecallError> {
         if self.protocol_version != RECALL_PROTOCOL_VERSION {
             return Err(RecallError::ProtocolVersion(self.protocol_version.clone()));

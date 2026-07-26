@@ -4,41 +4,50 @@
   "required_integer_token_pattern": "-?(0|[1-9][0-9]*)",
   "expected_result": "reject_before_schema_validation",
   "schema_limitation": "JSON Schema draft 2020-12 integer assertions use mathematical value semantics and can accept 10.0 or 1e1. They do not enforce this lexical token rule.",
+  "rejection_layers": {
+    "rejected_tokens": "Well-formed JSON numbers whose spelling is not an integer token: a decimal point or an exponent marker. These parse as JSON, and a JSON Schema `type: integer` assertion may accept them, so the lexical preflight is the only thing that rejects them.",
+    "rejected_malformed_tokens": "Spellings that are not well-formed JSON numbers at all: a leading `+`, or a leading zero followed by another digit. RFC 8259 forbids both, so a conforming parser rejects the whole document before any schema or type-driven check can run. They are listed separately because a consumer cannot reach them through a generic JSON value the way it can reach the tokens above."
+  },
   "envelope_cases": [
     {
       "name": "issued_at_decimal",
       "json_pointer": "/payload/issued_at_unix_ms",
       "field": "issued_at_unix_ms",
       "integer_token": "1760000000000",
-      "rejected_tokens": ["1760000000000.0", "1.76e12"]
+      "rejected_tokens": ["1760000000000.0", "1.76e12"],
+      "rejected_malformed_tokens": ["+1760000000000", "01760000000000"]
     },
     {
       "name": "expires_at_decimal",
       "json_pointer": "/payload/expires_at_unix_ms",
       "field": "expires_at_unix_ms",
       "integer_token": "1760000030000",
-      "rejected_tokens": ["1760000030000.0", "1.76000003e12"]
+      "rejected_tokens": ["1760000030000.0", "1.76000003e12"],
+      "rejected_malformed_tokens": ["+1760000030000", "01760000030000"]
     },
     {
       "name": "limit_decimal",
       "json_pointer": "/payload/limit",
       "field": "limit",
       "integer_token": "10",
-      "rejected_tokens": ["10.0", "1e1", "1E1"]
+      "rejected_tokens": ["10.0", "1e1", "1E1"],
+      "rejected_malformed_tokens": ["+1", "007", "01", "-01"]
     },
     {
       "name": "rank_decimal",
       "json_pointer": "/payload/hits/0/rank",
       "field": "rank",
       "integer_token": "0",
-      "rejected_tokens": ["0.0", "0e0", "0E+0"]
+      "rejected_tokens": ["0.0", "0e0", "0E+0"],
+      "rejected_malformed_tokens": ["+0", "00", "007"]
     },
     {
       "name": "score_decimal",
       "json_pointer": "/payload/hits/0/score_micros",
       "field": "score_micros",
       "integer_token": "875000",
-      "rejected_tokens": ["875000.0", "8.75e5"]
+      "rejected_tokens": ["875000.0", "8.75e5"],
+      "rejected_malformed_tokens": ["+875000", "0875000", "-0875000"]
     }
   ]
 }

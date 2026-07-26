@@ -23,7 +23,7 @@ uuid = { version = "1", default-features = false, features = ["serde", "std"] }
 [dev-dependencies]
 # Test-only. Used exclusively to produce and check the deterministic Ed25519
 # vector under `vectors/`. This crate performs no runtime signing or
-# verification -- that is S0.2 (AEON signer) and S0.3 (Nexus verifier).
+# verification -- that is S0.1b (AEON signer) and S0.1c (Nexus verifier).
 ed25519-dalek = "2"
 # Test-only JSON Schema validator (draft 2020-12), used to prove the
 # language-neutral schema and the Rust types agree. Pure Rust, no network
