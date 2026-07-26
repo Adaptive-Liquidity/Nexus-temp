@@ -470,6 +470,78 @@ fn schema_accepts_explicit_null() {
 }
 
 #[test]
+fn lexical_number_token_vector_matches_schema_and_rust_ingest() {
+    let vector_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/vectors/recall_envelope_v2/number_tokens.json"
+    );
+    let vector_raw = std::fs::read_to_string(vector_path).expect("number token vector present");
+    let vector: Value = serde_json::from_str(&vector_raw).expect("number token vector is JSON");
+    assert_eq!(
+        vector["profile"],
+        "aeon-recall-envelope-v2-number-tokens-v1"
+    );
+    assert_eq!(
+        vector["required_integer_token_pattern"],
+        "-?(0|[1-9][0-9]*)"
+    );
+
+    let schema_json: Value =
+        serde_json::from_str(include_str!("../schema/recall_envelope_v2.schema.json"))
+            .expect("schema JSON parses");
+    assert!(
+        schema_json["$comment"]
+            .as_str()
+            .is_some_and(|comment| comment.contains("lexical number-token preflight")),
+        "the schema must warn consumers that `type: integer` is not a lexical gate"
+    );
+
+    let valid_raw = serde_json::to_string(&envelope(base_payload())).expect("serialize");
+    serde_json::from_str::<RecallEnvelopeV2>(&valid_raw)
+        .expect("the integer-token baseline must deserialize");
+
+    for case in vector["envelope_cases"]
+        .as_array()
+        .expect("envelope_cases array")
+    {
+        let name = case["name"].as_str().expect("case name");
+        let field = case["field"].as_str().expect("field");
+        let integer_token = case["integer_token"].as_str().expect("integer token");
+        let marker = format!("\"{field}\":{integer_token}");
+        assert_eq!(
+            valid_raw.matches(&marker).count(),
+            1,
+            "{name}: baseline marker must occur exactly once"
+        );
+
+        for invalid_token in case["rejected_tokens"]
+            .as_array()
+            .expect("rejected_tokens array")
+        {
+            let invalid_token = invalid_token.as_str().expect("raw token string");
+            assert!(
+                invalid_token.contains(['.', 'e', 'E']),
+                "{name}: rejected token must exercise fractional/exponent syntax"
+            );
+            let replacement = format!("\"{field}\":{invalid_token}");
+            let mutated = valid_raw.replacen(&marker, &replacement, 1);
+            let as_value: Value =
+                serde_json::from_str(&mutated).expect("mutated fixture remains valid JSON");
+
+            assert!(
+                schema_accepts(&as_value),
+                "{name}: JSON Schema integer semantics should demonstrate the lexical gap for \
+                 token {invalid_token}"
+            );
+            assert!(
+                serde_json::from_str::<RecallEnvelopeV2>(&mutated).is_err(),
+                "{name}: Rust ingest must reject floating-point token {invalid_token}"
+            );
+        }
+    }
+}
+
+#[test]
 fn schema_bounds_score_micros_to_the_signed_64_bit_wire_range() {
     for boundary in [i64::MIN, i64::MAX] {
         let mut value = valid_envelope_value();
@@ -1020,7 +1092,7 @@ fn envelope_fixture_signature_verifies_with_the_checked_in_public_key() {
 
 // ── Artifact manifest enforcement ────────────────────────────────────────────
 
-/// Every artifact AEON-IQ vendors in S0.2 is hashed here. Editing a fixture or
+/// Every artifact AEON-IQ vendors in S0.1b is hashed here. Editing a fixture or
 /// the schema without deliberately updating `MANIFEST.sha256` fails this test.
 ///
 /// The manifest -- not this file, and not PROTOCOL.md -- is the single source
@@ -1057,8 +1129,8 @@ fn artifact_manifest_matches_checked_in_files() {
     }
 
     assert_eq!(
-        checked, 6,
-        "manifest must cover exactly the schema, PROTOCOL.md and the four \
+        checked, 7,
+        "manifest must cover exactly the schema, PROTOCOL.md and the five \
          vector fixtures -- and must never list itself"
     );
     assert!(
@@ -1099,6 +1171,7 @@ fn artifact_manifest_detects_a_modified_file() {
         "vectors/recall_envelope_v2/vector.json",
         "vectors/recall_envelope_v2/envelope.json",
         "vectors/recall_envelope_v2/canonicalization_strings.json",
+        "vectors/recall_envelope_v2/number_tokens.json",
     ] {
         assert!(manifest.contains(relative), "manifest must list {relative}");
     }

@@ -1,0 +1,44 @@
+{
+  "profile": "aeon-recall-envelope-v2-number-tokens-v1",
+  "scope": "Every JSON number token in the complete RecallEnvelopeV2 document, before conversion to a generic JSON value or JSON Schema validation.",
+  "required_integer_token_pattern": "-?(0|[1-9][0-9]*)",
+  "expected_result": "reject_before_schema_validation",
+  "schema_limitation": "JSON Schema draft 2020-12 integer assertions use mathematical value semantics and can accept 10.0 or 1e1. They do not enforce this lexical token rule.",
+  "envelope_cases": [
+    {
+      "name": "issued_at_decimal",
+      "json_pointer": "/payload/issued_at_unix_ms",
+      "field": "issued_at_unix_ms",
+      "integer_token": "1760000000000",
+      "rejected_tokens": ["1760000000000.0", "1.76e12"]
+    },
+    {
+      "name": "expires_at_decimal",
+      "json_pointer": "/payload/expires_at_unix_ms",
+      "field": "expires_at_unix_ms",
+      "integer_token": "1760000030000",
+      "rejected_tokens": ["1760000030000.0", "1.76000003e12"]
+    },
+    {
+      "name": "limit_decimal",
+      "json_pointer": "/payload/limit",
+      "field": "limit",
+      "integer_token": "10",
+      "rejected_tokens": ["10.0", "1e1", "1E1"]
+    },
+    {
+      "name": "rank_decimal",
+      "json_pointer": "/payload/hits/0/rank",
+      "field": "rank",
+      "integer_token": "0",
+      "rejected_tokens": ["0.0", "0e0", "0E+0"]
+    },
+    {
+      "name": "score_decimal",
+      "json_pointer": "/payload/hits/0/score_micros",
+      "field": "score_micros",
+      "integer_token": "875000",
+      "rejected_tokens": ["875000.0", "8.75e5"]
+    }
+  ]
+}

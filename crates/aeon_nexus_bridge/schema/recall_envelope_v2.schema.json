@@ -3,6 +3,8 @@
   "$id": "https://adaptiveliquidity.dev/schema/aeon-recall-envelope-v2.json",
   "title": "RecallEnvelopeV2",
   "description": "Replay-resistant AEON-IQ recall attestation. Language-neutral contract; the Rust implementation in crates/aeon_nexus_bridge is one conforming implementation and is proven against vectors/recall_envelope_v2/. Every optional key MUST be present with an explicit null when it has no value -- an absent key is invalid. Timestamps are integer milliseconds since the Unix epoch, never RFC 3339 strings. Scores are fixed-point integer micros; no floating-point value may appear anywhere in this document.",
+  "$comment": "JSON Schema integer assertions use mathematical value semantics and do not enforce token spelling. Conforming consumers MUST perform the lexical number-token preflight in PROTOCOL.md section 4 and vectors/recall_envelope_v2/number_tokens.json before conversion to a generic JSON value or schema validation; every number token MUST match -?(0|[1-9][0-9]*).",
+
   "type": "object",
   "additionalProperties": false,
   "required": ["payload", "signature"],

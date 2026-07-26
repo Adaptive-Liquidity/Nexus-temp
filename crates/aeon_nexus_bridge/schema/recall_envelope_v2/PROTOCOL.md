@@ -147,8 +147,14 @@ described as such.
    - U+2028 and U+2029 are emitted directly as UTF-8.
 7. A lone UTF-16 surrogate is not a Unicode scalar and MUST be rejected by the
    JSON parser before canonicalization.
-8. **Numbers MUST be integers.** A floating-point value anywhere in the payload
-   is an error, not a rounding opportunity.
+8. **Numbers MUST be integers at the lexical token level.** Before conversion to
+   a generic JSON value or JSON Schema validation, inspect the raw input and
+   require every JSON number token to match `-?(0|[1-9][0-9]*)`. Any token with
+   a decimal point or exponent marker (`e` or `E`) MUST be rejected, including
+   mathematically integral spellings such as `10.0` and `1e1`. JSON Schema
+   draft 2020-12 uses mathematical value semantics for `type: integer`, so the
+   schema alone is not a sufficient lexical gate. The normative cases are in
+   `vectors/recall_envelope_v2/number_tokens.json`.
 9. Duplicate object keys MUST be rejected before canonicalization.
 
 Key ordering MUST be performed explicitly, not inherited from a language's map
@@ -258,12 +264,13 @@ invalidating the signature.
 
 **Verifier**
 
-1. Parse strictly; reject unknown fields, duplicate keys, absent optional keys.
-2. Validate payload shape (§9) and signature shape (§1.5).
-3. Recompute `canonical(payload)` and `signing_bytes` from the received payload.
-4. Recompute `SHA-256(signing_bytes)`; reject on mismatch with
+1. Inspect raw JSON number tokens per §4 and reject any non-integer spelling.
+2. Parse strictly; reject unknown fields, duplicate keys, absent optional keys.
+3. Validate payload shape (§9) and signature shape (§1.5).
+4. Recompute `canonical(payload)` and `signing_bytes` from the received payload.
+5. Recompute `SHA-256(signing_bytes)`; reject on mismatch with
    `signed_payload_digest`.
-5. Verify the Ed25519 signature over the **recomputed** signing bytes, using a
+6. Verify the Ed25519 signature over the **recomputed** signing bytes, using a
    key selected by `key_id` from a trusted keyring — never from the envelope.
 
 A verifier MUST NOT trust `signed_payload_digest` in place of recomputation, and
@@ -287,14 +294,14 @@ MUST NOT accept an `algorithm` other than `ed25519`.
 | digests | `algorithm = "sha256"`, 64 lowercase hex chars |
 | signed payload digest | `public_recomputable = true` |
 | unknown fields | rejected |
-| numbers | integers only |
+| numbers | raw token matches `-?(0|[1-9][0-9]*)`; schema validation alone is insufficient |
 
 Empty `hits` is valid and signable: a recall that returned nothing is a real,
 attestable event.
 
 **Clock skew is NOT validated here.** `issued_at`/`expires_at` are checked only
 for internal consistency and TTL bound. Comparing them to a wall clock is
-verifier policy (S0.3).
+verifier policy (S0.1c).
 
 ---
 
@@ -357,13 +364,15 @@ after the fact without re-signing.
 
 ## 14. Deferred
 
-**S0.2 (AEON-IQ producer)** — populate real values; sign with a managed key;
+**S0.1b (AEON-IQ producer)** — populate real values; sign with a managed key;
 vendor the schema and vectors below and pass byte-for-byte conformance;
 preserve pseudonymous identifiers (§10).
 
-**S0.3 (Nexus verifier)** — resolve `key_id` against a trusted keyring; verify
+**S0.1c (Nexus verifier)** — resolve `key_id` against a trusted keyring; verify
 signatures; enforce clock skew and the validity window; enforce nonce
 uniqueness (replay storage); define failure and audit behaviour.
+
+Stage 0.2 remains the event chain. Stage 0.3 remains snapshot consistency.
 
 ---
 
@@ -383,6 +392,7 @@ standard `sha256sum` format, paths relative to the crate root, covering:
 - `vectors/recall_envelope_v2/vector.json`
 - `vectors/recall_envelope_v2/envelope.json`
 - `vectors/recall_envelope_v2/canonicalization_strings.json`
+- `vectors/recall_envelope_v2/number_tokens.json`
 
 They are deliberately **not** duplicated in this document. A second copy would
 drift, and a stale hash in a normative spec is worse than none. The test
