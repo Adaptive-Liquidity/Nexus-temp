@@ -180,8 +180,15 @@
           "description": "Lowercase hex, exactly 128 characters (64-byte Ed25519 signature)."
         },
         "signed_payload_digest": {
-          "allOf": [{ "$ref": "#/$defs/sha256Digest" }],
-          "description": "SHA-256 of the SIGNING BYTES (domain prefix included), not of canonical(payload) alone."
+          "allOf": [
+            { "$ref": "#/$defs/sha256Digest" },
+            {
+              "properties": {
+                "public_recomputable": { "const": true }
+              }
+            }
+          ],
+          "description": "SHA-256 of the SIGNING BYTES (domain prefix included), not of canonical(payload) alone. public_recomputable MUST be true."
         },
         "signing_domain": {
           "const": "AEON_RECALL_ENVELOPE_V2",

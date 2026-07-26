@@ -76,7 +76,7 @@ the exact lowercase string `sha256`.
 | `algorithm` | string | exactly `ed25519` |
 | `key_id` | string | non-empty |
 | `signature` | string | exactly 128 lowercase hex chars (64 bytes) |
-| `signed_payload_digest` | digest | §7 |
+| `signed_payload_digest` | digest | §7; `public_recomputable` is exactly `true` |
 | `signing_domain` | string | exactly `AEON_RECALL_ENVELOPE_V2` |
 
 `signing_domain` is a declarative echo of the frozen label, never
@@ -201,7 +201,9 @@ signed_payload_digest = SHA-256( signing_bytes )
 ```
 
 `signed_payload_digest` is the digest of the **signing bytes**, not of
-`canonical(payload)` alone, so it inherits domain separation. The digest of the
+`canonical(payload)` alone, so it inherits domain separation. Its
+`public_recomputable` member MUST be `true`: the payload and frozen domain bytes
+are public inputs, so every verifier can recompute this digest. The digest of the
 bare canonical payload MUST NOT be placed in a signature envelope. (The test
 vector publishes it as `payload_digest_diagnostic` purely so the two values can
 be compared; it is not part of the contract.)
@@ -283,6 +285,7 @@ MUST NOT accept an `algorithm` other than `ed25519`.
 | uniqueness | all `memory_id` unique; all `memory_version_id` unique |
 | identifiers | required ids non-empty; a present optional id must be non-empty |
 | digests | `algorithm = "sha256"`, 64 lowercase hex chars |
+| signed payload digest | `public_recomputable = true` |
 | unknown fields | rejected |
 | numbers | integers only |
 

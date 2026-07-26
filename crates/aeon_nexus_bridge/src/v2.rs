@@ -648,9 +648,12 @@ impl RecallEnvelopeV2 {
             "signed_payload_digest",
             &self.signature.signed_payload_digest,
         )?;
+        if !self.signature.signed_payload_digest.public_recomputable() {
+            return Err(RecallError::SignedPayloadDigestNotPubliclyRecomputable);
+        }
 
         let expected = recall_signed_payload_digest(&self.payload)?;
-        if self.signature.signed_payload_digest != expected {
+        if self.signature.signed_payload_digest.value() != expected.value() {
             return Err(RecallError::SignedPayloadDigestMismatch {
                 expected: expected.value().to_owned(),
                 found: self.signature.signed_payload_digest.value().to_owned(),
@@ -779,6 +782,7 @@ pub enum RecallError {
         algorithm: String,
     },
     SigningDomain(String),
+    SignedPayloadDigestNotPubliclyRecomputable,
     SignedPayloadDigestMismatch {
         expected: String,
         found: String,
@@ -860,6 +864,10 @@ impl fmt::Display for RecallError {
             Self::SigningDomain(found) => write!(
                 f,
                 "signing_domain must be {RECALL_SIGNING_DOMAIN_LABEL}, found {found}"
+            ),
+            Self::SignedPayloadDigestNotPubliclyRecomputable => write!(
+                f,
+                "signed_payload_digest.public_recomputable must be true"
             ),
             Self::SignedPayloadDigestMismatch { expected, found } => write!(
                 f,

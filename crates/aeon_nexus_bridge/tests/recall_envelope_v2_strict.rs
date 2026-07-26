@@ -625,6 +625,15 @@ fn schema_rejects_invalid_signature_envelope_shape() {
     let mut value = valid_envelope_value();
     value["signature"].as_object_mut().unwrap().remove("key_id");
     assert!(!schema_accepts(&value), "key_id is required");
+
+    // The signed payload digest is always recomputable from the public payload
+    // and frozen signing domain.
+    let mut value = valid_envelope_value();
+    value["signature"]["signed_payload_digest"]["public_recomputable"] = Value::from(false);
+    assert!(
+        !schema_accepts(&value),
+        "signed_payload_digest must declare public_recomputable=true"
+    );
 }
 
 // ── 5. signature envelope strictness ─────────────────────────────────────────
@@ -647,6 +656,18 @@ fn key_id_must_be_non_empty() {
     let mut env = envelope(base_payload());
     env.signature.key_id = String::new();
     assert!(env.validate().is_err());
+}
+
+#[test]
+fn signed_payload_digest_must_be_publicly_recomputable() {
+    let mut value = valid_envelope_value();
+    value["signature"]["signed_payload_digest"]["public_recomputable"] = Value::from(false);
+    let env: RecallEnvelopeV2 =
+        serde_json::from_value(value).expect("false remains valid for other V2 digest positions");
+    assert!(
+        env.validate().is_err(),
+        "signed_payload_digest is always publicly recomputable"
+    );
 }
 
 #[test]
