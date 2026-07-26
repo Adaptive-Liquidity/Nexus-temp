@@ -5,6 +5,7 @@
 Nexus provides microsecond-class sandbox initialization, native snapshot/rollback, capability-gated WASI execution, and opt-in self-correction telemetry for agents.
 
 [![Benchmarks](https://img.shields.io/badge/benchmarks-live-brightgreen)](https://adaptiveliquidity.github.io/Nexus/)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/Adaptive-Liquidity/Nexus-temp?utm_source=badge)
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
