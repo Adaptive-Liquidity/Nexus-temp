@@ -252,7 +252,7 @@ impl<'de> Deserialize<'de> for CanonicalUuid {
 /// field-level deserializer without `default`, making a missing key fail as a
 /// missing field. Present values deserialize directly from the original Serde
 /// stream, preserving nested duplicate-key detection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Nullable<T>(Option<T>);
 
 impl<T> Nullable<T> {

@@ -375,6 +375,7 @@ vectors/recall_envelope_v2/MANIFEST.sha256
 standard `sha256sum` format, paths relative to the crate root, covering:
 
 - `schema/recall_envelope_v2.schema.json`
+- `schema/recall_envelope_v2/PROTOCOL.md`
 - `vectors/recall_envelope_v2/payload.json`
 - `vectors/recall_envelope_v2/vector.json`
 - `vectors/recall_envelope_v2/envelope.json`
