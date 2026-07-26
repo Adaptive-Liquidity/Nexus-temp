@@ -174,7 +174,12 @@ jobs:
     name: "Criterion → CodSpeed.io (CPU simulation + memory)"
     runs-on: ubuntu-24.04
     timeout-minutes: 75
-    if: ${{ vars.CODSPEED_ENABLED != 'false' }}
+    # CodSpeed simulation + memory now runs in the dedicated codspeed.yml
+    # workflow (OIDC-authenticated). This job is kept disabled so the
+    # publish-dashboard dependency graph below still resolves (it tolerates a
+    # skipped result). Set CODSPEED_ENABLED_LEGACY=true to re-enable the legacy
+    # in-pipeline path if ever needed.
+    if: ${{ vars.CODSPEED_ENABLED_LEGACY == 'true' }}
     permissions:
       contents: read
       id-token: write
@@ -203,6 +208,10 @@ jobs:
     runs-on: codspeed-macro
     timeout-minutes: 75
     continue-on-error: true
+    # Bare-metal walltime is opt-in and requires codspeed-macro runners, which
+    # are only available on organization accounts. Left gated (disabled by
+    # default) so the dashboard dependency graph still resolves via a skipped
+    # result. See codspeed.yml for the always-on simulation setup.
     if: ${{ vars.CODSPEED_WALLTIME_ENABLED == 'true' && github.event_name != 'pull_request' }}
     permissions:
       contents: read
