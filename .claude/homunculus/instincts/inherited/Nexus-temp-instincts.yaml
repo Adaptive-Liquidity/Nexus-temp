@@ -1,0 +1,410 @@
+# Instincts generated from https://github.com/Adaptive-Liquidity/Nexus-temp
+# Generated: 2026-07-26T09:08:01.079Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: Nexus-temp-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: fix, ci, test, feat
+
+## Evidence
+
+- 15 commits analyzed
+- Detected conventional commit pattern
+- Examples: feat(bridge): define RecallEnvelopeV2 contract, test(bridge): add RecallEnvelopeV2 conformance vectors
+
+---
+id: Nexus-temp-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Commit Length
+
+## Action
+
+Keep commit messages concise (~45 characters)
+
+## Evidence
+
+- Average commit message length: 45 chars
+- Based on 15 commits
+
+---
+id: Nexus-temp-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Naming Files
+
+## Action
+
+Use camelCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: camelCase
+
+---
+id: Nexus-temp-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: Nexus-temp-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: Nexus-temp-workflow-protocol-contract-evolution
+trigger: "when doing protocol contract evolution"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Workflow Protocol Contract Evolution
+
+## Action
+
+Follow the protocol-contract-evolution workflow:
+1. Edit or add to the schema definition (JSON schema file).
+2. Edit or add to the protocol documentation (PROTOCOL.md).
+3. Update or implement Rust source files for the contract logic (src/v2.rs, canonicalization helpers, etc).
+4. Update or add test files for the contract (tests/recall_envelope_v2*.rs).
+5. Update test vectors (vectors/recall_envelope_v2/*.json).
+6. Update the manifest hash (MANIFEST.sha256) to reflect artifact changes.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: crates/aeon_nexus_bridge/schema/recall_envelope_v2.schema.json, crates/aeon_nexus_bridge/schema/recall_envelope_v2/PROTOCOL.md, crates/aeon_nexus_bridge/src/v2.rs
+
+---
+id: Nexus-temp-workflow-ci-workflow-update
+trigger: "when doing ci workflow update"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Workflow Ci Workflow Update
+
+## Action
+
+Follow the ci-workflow-update workflow:
+1. Edit or add GitHub Actions workflow YAML files.
+2. Commit changes to workflow files.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: .github/workflows/ci.yml, .github/workflows/benchmarks.yml
+
+---
+id: nexus-temp-instinct-file-naming
+trigger: "When creating or renaming a source file in the repository"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct File Naming
+
+## Action
+
+Use camelCase for file names
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.files
+
+---
+id: nexus-temp-instinct-function-naming
+trigger: "When defining a function in Rust code"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.functions
+
+---
+id: nexus-temp-instinct-class-naming
+trigger: "When defining a struct or enum (class-like type) in Rust"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Class Naming
+
+## Action
+
+Use PascalCase for type names
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.classes
+
+---
+id: nexus-temp-instinct-constant-naming
+trigger: "When defining a constant in Rust code"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.constants
+
+---
+id: nexus-temp-instinct-import-style
+trigger: "When importing modules in Rust code"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Import Style
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- Pattern in codeStyle.importStyle
+
+---
+id: nexus-temp-instinct-export-style
+trigger: "When exporting modules or items in Rust code"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in codeStyle.exportStyle
+
+---
+id: nexus-temp-instinct-test-location
+trigger: "When adding new test files"
+confidence: 0.7
+domain: testing
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Test Location
+
+## Action
+
+Place test files in the same folder as source files or in a dedicated tests folder (mixed test location)
+
+## Evidence
+
+- Pattern in architecture.folderStructure.testLocation
+- Seen in crates/aeon_nexus_bridge/tests/recall_envelope_v2.rs
+
+---
+id: nexus-temp-instinct-test-naming
+trigger: "When naming test files for protocol contracts"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Test Naming
+
+## Action
+
+Use the pattern recall_envelope_v2*.rs for test files related to RecallEnvelopeV2
+
+## Evidence
+
+- Pattern in crates/aeon_nexus_bridge/tests/recall_envelope_v2.rs
+- crates/aeon_nexus_bridge/tests/recall_envelope_v2_strict.rs
+
+---
+id: nexus-temp-instinct-test-vectors
+trigger: "When updating protocol contract logic or schema"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Test Vectors
+
+## Action
+
+Update or add test vectors in the corresponding vectors/recall_envelope_v2/*.json directory
+
+## Evidence
+
+- Pattern in protocol-contract-evolution workflow
+- Seen in commit sequences updating vectors/recall_envelope_v2/*.json
+
+---
+id: nexus-temp-instinct-commit-format
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Commit Format
+
+## Action
+
+Use Conventional Commits format with one of: fix, ci, test, feat as prefix, followed by (scope): message
+
+## Evidence
+
+- Pattern in commits.prefixes
+- Seen in commit 'feat(bridge): define RecallEnvelopeV2 contract'
+
+---
+id: nexus-temp-instinct-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Commit Length
+
+## Action
+
+Keep the commit message around 45 characters on average
+
+## Evidence
+
+- Pattern in commits.averageLength
+
+---
+id: nexus-temp-instinct-protocol-contract-evolution
+trigger: "When evolving or refining a protocol contract or its conformance suite"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Protocol Contract Evolution
+
+## Action
+
+Edit schema, update protocol docs, update Rust logic, add/modify tests, update test vectors, and update manifest hash in sequence
+
+## Evidence
+
+- protocol-contract-evolution workflow
+- Commit sequences involving schema, docs, src, tests, vectors, and manifest
+
+---
+id: nexus-temp-instinct-ci-workflow-update
+trigger: "When adding or modifying CI/CD automation"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Ci Workflow Update
+
+## Action
+
+Edit or add GitHub Actions workflow YAML files (.github/workflows/ci.yml, benchmarks.yml), then commit
+
+## Evidence
+
+- ci-workflow-update workflow
+- Commits modifying .github/workflows/ci.yml
+
