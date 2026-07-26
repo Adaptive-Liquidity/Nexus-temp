@@ -1,0 +1,13 @@
+# The schema, vectors and protocol document are hashed byte-for-byte by
+# `vectors/recall_envelope_v2/MANIFEST.sha256`, and by AEON-IQ when it vendors
+# them (S0.2). Their bytes must therefore be identical on every platform.
+#
+# Without these rules a checkout with `core.autocrlf=true` rewrites them to
+# CRLF, changing every hash and failing the manifest test for a reason that has
+# nothing to do with content.
+schema/** text eol=lf
+vectors/** text eol=lf
+
+# Rust sources are LF for the same determinism reason, and because rustfmt
+# output is compared in CI.
+*.rs text eol=lf

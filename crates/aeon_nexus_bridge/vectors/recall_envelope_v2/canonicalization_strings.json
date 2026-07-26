@@ -1,0 +1,79 @@
+{
+  "canonicalization_version": "aeon-canonical-json-v1",
+  "description": "Language-neutral string vectors. canonical_utf8_hex is the complete canonical JSON string encoding, including quote delimiters.",
+  "cases": [
+    {
+      "name": "composed_e_acute",
+      "value": "\u00e9",
+      "scalar_utf8_hex": "c3a9",
+      "canonical_utf8_hex": "22c3a922"
+    },
+    {
+      "name": "decomposed_e_acute",
+      "value": "e\u0301",
+      "scalar_utf8_hex": "65cc81",
+      "canonical_utf8_hex": "2265cc8122"
+    },
+    {
+      "name": "emoji",
+      "value": "\ud83d\ude00",
+      "scalar_utf8_hex": "f09f9880",
+      "canonical_utf8_hex": "22f09f988022"
+    },
+    {
+      "name": "quote",
+      "value": "\"",
+      "scalar_utf8_hex": "22",
+      "canonical_utf8_hex": "225c2222"
+    },
+    {
+      "name": "backslash",
+      "value": "\\",
+      "scalar_utf8_hex": "5c",
+      "canonical_utf8_hex": "225c5c22"
+    },
+    {
+      "name": "newline",
+      "value": "\n",
+      "scalar_utf8_hex": "0a",
+      "canonical_utf8_hex": "225c6e22"
+    },
+    {
+      "name": "tab",
+      "value": "\t",
+      "scalar_utf8_hex": "09",
+      "canonical_utf8_hex": "225c7422"
+    },
+    {
+      "name": "control_u0001",
+      "value": "\u0001",
+      "scalar_utf8_hex": "01",
+      "canonical_utf8_hex": "225c753030303122"
+    },
+    {
+      "name": "slash",
+      "value": "/",
+      "scalar_utf8_hex": "2f",
+      "canonical_utf8_hex": "222f22"
+    },
+    {
+      "name": "line_separator_u2028",
+      "value": "\u2028",
+      "scalar_utf8_hex": "e280a8",
+      "canonical_utf8_hex": "22e280a822"
+    },
+    {
+      "name": "paragraph_separator_u2029",
+      "value": "\u2029",
+      "scalar_utf8_hex": "e280a9",
+      "canonical_utf8_hex": "22e280a922"
+    }
+  ],
+  "distinct_pairs": [
+    {
+      "left": "composed_e_acute",
+      "right": "decomposed_e_acute",
+      "reason": "No Unicode normalization; the canonical byte strings remain distinct."
+    }
+  ]
+}
