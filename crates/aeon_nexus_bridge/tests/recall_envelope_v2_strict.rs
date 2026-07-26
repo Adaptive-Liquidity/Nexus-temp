@@ -1185,8 +1185,10 @@ fn artifact_manifest_detects_a_modified_file() {
 /// insertion-ordered `IndexMap`.
 ///
 /// The canonicaliser sorts keys explicitly rather than inheriting `Map` order,
-/// so these values must hold under either setting. This test pins them; the
-/// companion isolated build with `preserve_order` on runs the same assertions.
+/// so these values must hold under either setting. This test pins them, and the
+/// `aeon_nexus_bridge preserve-order conformance` job in
+/// `.github/workflows/ci.yml` re-runs it with the feature enabled, so both
+/// builds are covered on every pull request and every push to `main`.
 #[test]
 fn canonical_values_are_independent_of_map_ordering() {
     let payload_path = concat!(
