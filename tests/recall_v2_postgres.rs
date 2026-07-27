@@ -452,21 +452,23 @@ async fn postgres_replay_store_live_database_contract() {
             .await
             .expect("racing purge")
     });
-    let race_tasks = (0..32).map(|attempt| {
-        let store = if attempt % 2 == 0 {
-            Arc::clone(&store)
-        } else {
-            Arc::clone(&second_store)
-        };
-        let barrier = Arc::clone(&race_barrier);
-        tokio::spawn(async move {
-            barrier.wait().await;
-            store
-                .consume_once(namespace_a, &nonce(20), 30)
-                .await
-                .expect("racing consume")
+    let race_tasks = (0..32)
+        .map(|attempt| {
+            let store = if attempt % 2 == 0 {
+                Arc::clone(&store)
+            } else {
+                Arc::clone(&second_store)
+            };
+            let barrier = Arc::clone(&race_barrier);
+            tokio::spawn(async move {
+                barrier.wait().await;
+                store
+                    .consume_once(namespace_a, &nonce(20), 30)
+                    .await
+                    .expect("racing consume")
+            })
         })
-    });
+        .collect::<Vec<_>>();
     race_barrier.wait().await;
     let race_fresh = join_all(race_tasks)
         .await
