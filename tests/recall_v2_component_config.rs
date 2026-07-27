@@ -146,8 +146,14 @@ fn enforced_mode_loads_only_explicitly_pinned_active_and_retired_keys() {
 
     assert_eq!(config.mode(), RecallV2RuntimeMode::Enforced);
     assert_eq!(trusted.len(), 2);
-    assert_eq!(trusted.active_key_ids(), &[active_key_id.clone()]);
-    assert_eq!(trusted.retired_key_ids(), &[retired_key_id.clone()]);
+    assert_eq!(
+        trusted.active_key_ids(),
+        std::slice::from_ref(&active_key_id)
+    );
+    assert_eq!(
+        trusted.retired_key_ids(),
+        std::slice::from_ref(&retired_key_id)
+    );
     assert!(trusted.contains_key(&active_key_id));
     assert!(trusted.contains_key(&retired_key_id));
     assert!(!trusted.contains_key("response-discovered-key"));
