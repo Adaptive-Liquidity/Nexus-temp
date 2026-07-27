@@ -340,6 +340,11 @@ jobs:
             echo "::error::The replay-store test did not visibly reach PostgreSQL"
             exit 1
           }
+          grep -q '^POSTGRES_RECALL_V2_COMPONENTS_CONSTRUCTED ' "$log" || {
+            echo "::error::The V2 production components did not construct against PostgreSQL"
+            exit 1
+          }
+
 
           grep -q 'test result: ok\. 1 passed' "$log" || {
             echo "::error::postgres_replay_store_live_database_contract did not pass"

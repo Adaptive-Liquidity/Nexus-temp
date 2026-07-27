@@ -14,10 +14,15 @@ use nexus::aeon::recall_v2::{
     Clock, ExpectedRecallContext, RecallVerificationPolicy, RecallVerifier, ReplayConsumeResult,
     ReplayNamespace, ReplayStore, ReplayStoreError, TrustedKey, TrustedKeyBundle,
 };
+use nexus::aeon::recall_v2_config::{
+    construct_recall_v2_components, RecallV2ComponentConfig, RecallV2Components,
+    RecallV2ConfigValues, RecallV2StartupError,
+};
 use nexus::aeon::recall_v2_postgres::{
     PostgresReplayStore, MAX_PURGE_BATCH_SIZE, POSTGRES_REPLAY_SCHEMA_VERSION,
     POSTGRES_REPLAY_TABLE,
 };
+use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use tokio::sync::Barrier;
@@ -120,6 +125,34 @@ async fn replay_namespaces() -> (ReplayNamespace, ReplayNamespace) {
 
 fn nonce(value: u64) -> String {
     format!("{value:064x}")
+}
+fn component_config(database_url: &str, connect_timeout_ms: u64) -> RecallV2ComponentConfig {
+    let second_key = SigningKey::from_bytes(&[0x5a; 32]);
+    let trusted_keys_json = json!({
+        "version": 1,
+        "keys": [
+            {
+                "key_id": VECTOR_KEY_ID,
+                "public_key_hex": to_lowercase_hex(&VECTOR_PUBLIC_KEY),
+                "state": "active"
+            },
+            {
+                "key_id": "test-key-retired",
+                "public_key_hex": to_lowercase_hex(&second_key.verifying_key().to_bytes()),
+                "state": "retired"
+            }
+        ]
+    })
+    .to_string();
+    RecallV2ComponentConfig::from_values(RecallV2ConfigValues {
+        mode: Some("enforced".to_owned()),
+        trusted_keys_json: Some(trusted_keys_json),
+        replay_database_url: Some(database_url.to_owned()),
+        pool_max_connections: Some("4".to_owned()),
+        connect_timeout_ms: Some(connect_timeout_ms.to_string()),
+        operation_timeout_ms: Some(OPERATION_TIMEOUT.as_millis().to_string()),
+    })
+    .expect("component test configuration is valid")
 }
 
 fn env_truthy(name: &str) -> bool {
@@ -291,6 +324,24 @@ async fn postgres_replay_store_live_database_contract() {
             .is_err(),
         "construction must fail closed before migration"
     );
+    let missing_schema =
+        construct_recall_v2_components(component_config(&database_url, 1_000)).await;
+    assert!(
+        matches!(missing_schema, Err(RecallV2StartupError::ReplayStore(_))),
+        "enforced component construction must fail when the schema is unavailable"
+    );
+
+    let unavailable_database = format!("{database_url}_missing");
+    let unavailable =
+        construct_recall_v2_components(component_config(&unavailable_database, 1_000)).await;
+    assert!(
+        matches!(
+            unavailable,
+            Err(RecallV2StartupError::ReplayDatabaseUnavailable(_))
+                | Err(RecallV2StartupError::ReplayDatabaseConnectTimedOut)
+        ),
+        "enforced component construction must fail when PostgreSQL is unavailable"
+    );
 
     PostgresReplayStore::apply_migrations(&pool, OPERATION_TIMEOUT)
         .await
@@ -318,6 +369,30 @@ async fn postgres_replay_store_live_database_contract() {
         .execute(&pool)
         .await
         .expect("test restores supported schema version");
+    let components = construct_recall_v2_components(component_config(&database_url, 1_000))
+        .await
+        .expect("enforced components construct against the migrated schema");
+    let RecallV2Components::Enforced(enforced_components) = &components else {
+        panic!("enforced mode must not fall back to disabled components");
+    };
+    assert_eq!(
+        enforced_components.trusted_keys().active_key_ids(),
+        &[VECTOR_KEY_ID]
+    );
+    assert_eq!(
+        enforced_components.trusted_keys().retired_key_ids(),
+        &["test-key-retired"]
+    );
+    assert_eq!(
+        enforced_components.replay_store().operation_timeout(),
+        OPERATION_TIMEOUT
+    );
+    println!(
+        "POSTGRES_RECALL_V2_COMPONENTS_CONSTRUCTED active_keys={} retired_keys={}",
+        enforced_components.trusted_keys().active_key_ids().len(),
+        enforced_components.trusted_keys().retired_key_ids().len()
+    );
+    drop(components);
 
     let store = Arc::new(
         PostgresReplayStore::new(pool.clone(), OPERATION_TIMEOUT)
