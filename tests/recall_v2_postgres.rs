@@ -400,7 +400,11 @@ async fn postgres_replay_store_live_database_contract() {
         tokio::spawn(async move {
             barrier.wait().await;
             store
-                .consume_once(namespace_a, &nonce(4), ISSUED_AT_MS + 30_000)
+                .consume_once(
+                    namespace_a,
+                    &nonce(4),
+                    ISSUED_AT_MS + 30_000 + i64::from(attempt),
+                )
                 .await
                 .expect("multi-pool consume")
         })
@@ -412,6 +416,17 @@ async fn postgres_replay_store_live_database_contract() {
         .filter(|result| *result == ReplayConsumeResult::Fresh)
         .count();
     assert_eq!(multi_pool_fresh, 1);
+    let multi_pool_expiry: i64 = sqlx::query_scalar(
+        "SELECT expires_at_unix_ms
+         FROM public.nexus_recall_replay_nonces
+         WHERE replay_namespace = $1 AND nonce = $2",
+    )
+    .bind(namespace_a.as_bytes().as_slice())
+    .bind(nonce(4))
+    .fetch_one(&pool)
+    .await
+    .expect("multi-pool expiry is readable");
+    assert_eq!(multi_pool_expiry, ISSUED_AT_MS + 30_031);
 
     let restart_pool = connect(&database_url, 2).await;
     let restart_store = PostgresReplayStore::new(restart_pool.clone(), OPERATION_TIMEOUT)
@@ -439,6 +454,39 @@ async fn postgres_replay_store_live_database_contract() {
             .await
             .expect("post-restart consume"),
         ReplayConsumeResult::Replayed
+    );
+
+    assert_eq!(
+        store
+            .consume_once(namespace_a, &nonce(6), 100)
+            .await
+            .expect("shorter-expiry consume"),
+        ReplayConsumeResult::Fresh
+    );
+    assert_eq!(
+        second_store
+            .consume_once(namespace_a, &nonce(6), 300)
+            .await
+            .expect("later-expiry replay"),
+        ReplayConsumeResult::Replayed
+    );
+    let extended_expiry: i64 = sqlx::query_scalar(
+        "SELECT expires_at_unix_ms
+         FROM public.nexus_recall_replay_nonces
+         WHERE replay_namespace = $1 AND nonce = $2",
+    )
+    .bind(namespace_a.as_bytes().as_slice())
+    .bind(nonce(6))
+    .fetch_one(&pool)
+    .await
+    .expect("conflict expiry is readable");
+    assert_eq!(extended_expiry, 300);
+    assert_eq!(
+        store
+            .purge_expired_before(200, 100)
+            .await
+            .expect("cleanup preserves the extended validity window"),
+        0
     );
 
     for (value, expires_at) in [(10, 100), (11, 200), (12, 300), (13, 50), (14, 60)] {

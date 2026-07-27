@@ -23,19 +23,24 @@ pub const MAX_PURGE_BATCH_SIZE: u32 = 10_000;
 const MIGRATION_SQL: &str = include_str!("../../migrations/0001_recall_replay_store.sql");
 const CONSUME_CLEANUP_LOCK_KEY: i64 = 5_640_004_627_203_514_945;
 
-const CONSUME_SQL: &str = "
+const CONSUME_INSERT_SQL: &str = "
 WITH replay_guard AS MATERIALIZED (
     SELECT pg_advisory_xact_lock_shared($4)
-),
-inserted AS (
-    INSERT INTO public.nexus_recall_replay_nonces
-        (replay_namespace, nonce, expires_at_unix_ms)
-    SELECT $1, $2, $3
-    FROM replay_guard
-    ON CONFLICT (replay_namespace, nonce) DO NOTHING
-    RETURNING TRUE
 )
-SELECT TRUE FROM inserted
+INSERT INTO public.nexus_recall_replay_nonces
+    (replay_namespace, nonce, expires_at_unix_ms)
+SELECT $1, $2, $3
+FROM replay_guard
+ON CONFLICT (replay_namespace, nonce) DO NOTHING
+RETURNING TRUE
+";
+
+const EXTEND_EXPIRY_SQL: &str = "
+UPDATE public.nexus_recall_replay_nonces AS replay
+SET expires_at_unix_ms = GREATEST(replay.expires_at_unix_ms, $3)
+WHERE replay.replay_namespace = $1
+  AND replay.nonce = $2
+  AND replay.expires_at_unix_ms < $3
 ";
 
 const PURGE_SQL: &str = "
@@ -149,25 +154,62 @@ impl ReplayStore for PostgresReplayStore {
         validate_nonce(nonce).map_err(ReplayStoreError::new)?;
         validate_expires_at(expires_at_unix_ms).map_err(ReplayStoreError::new)?;
 
-        let inserted: Option<bool> = timeout_sqlx(
+        timeout_sqlx(
             self.operation_timeout,
             "consume replay nonce",
-            sqlx::query_scalar(CONSUME_SQL)
-                .bind(replay_namespace.as_bytes().as_slice())
-                .bind(nonce)
-                .bind(expires_at_unix_ms)
-                .bind(CONSUME_CLEANUP_LOCK_KEY)
-                .fetch_optional(&self.pool),
+            consume_transaction(&self.pool, replay_namespace, nonce, expires_at_unix_ms),
         )
         .await
-        .map_err(ReplayStoreError::new)?;
-
-        Ok(if inserted.is_some() {
-            ReplayConsumeResult::Fresh
-        } else {
-            ReplayConsumeResult::Replayed
-        })
+        .map_err(ReplayStoreError::new)
     }
+}
+
+async fn consume_transaction(
+    pool: &PgPool,
+    replay_namespace: ReplayNamespace,
+    nonce: &str,
+    expires_at_unix_ms: i64,
+) -> Result<ReplayConsumeResult, sqlx::Error> {
+    let namespace_bytes = replay_namespace.as_bytes().as_slice();
+    let mut transaction = pool.begin().await?;
+    let inserted: Option<bool> = sqlx::query_scalar(CONSUME_INSERT_SQL)
+        .bind(namespace_bytes)
+        .bind(nonce)
+        .bind(expires_at_unix_ms)
+        .bind(CONSUME_CLEANUP_LOCK_KEY)
+        .fetch_optional(&mut *transaction)
+        .await?;
+
+    let result = if inserted.is_some() {
+        ReplayConsumeResult::Fresh
+    } else {
+        let extended = sqlx::query(EXTEND_EXPIRY_SQL)
+            .bind(namespace_bytes)
+            .bind(nonce)
+            .bind(expires_at_unix_ms)
+            .execute(&mut *transaction)
+            .await?;
+        if extended.rows_affected() == 0 {
+            let row_exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                     SELECT 1
+                     FROM public.nexus_recall_replay_nonces
+                     WHERE replay_namespace = $1 AND nonce = $2
+                 )",
+            )
+            .bind(namespace_bytes)
+            .bind(nonce)
+            .fetch_one(&mut *transaction)
+            .await?;
+            if !row_exists {
+                return Err(sqlx::Error::RowNotFound);
+            }
+        }
+        ReplayConsumeResult::Replayed
+    };
+
+    transaction.commit().await?;
+    Ok(result)
 }
 
 #[derive(Debug)]
@@ -451,28 +493,6 @@ async fn validate_schema(
     if !privileges {
         return Err(PostgresReplayStoreError::SchemaContract(
             "current database role lacks SELECT, INSERT, DELETE, or UPDATE",
-        ));
-    }
-
-    let malformed_rows: bool = timeout_sqlx(
-        operation_timeout,
-        "validate stored replay rows",
-        sqlx::query_scalar(
-            "SELECT EXISTS (
-                 SELECT 1
-                 FROM public.nexus_recall_replay_nonces
-                 WHERE octet_length(replay_namespace) <> 32
-                    OR octet_length(nonce) <> 64
-                    OR nonce !~ '^[0-9a-f]{64}$'
-                    OR expires_at_unix_ms < 0
-             )",
-        )
-        .fetch_one(pool),
-    )
-    .await?;
-    if malformed_rows {
-        return Err(PostgresReplayStoreError::SchemaContract(
-            "replay table contains malformed stored values",
         ));
     }
 
