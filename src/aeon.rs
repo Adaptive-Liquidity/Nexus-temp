@@ -5,6 +5,8 @@
 //! the AEON-IQ management API key is read only from explicit `NEXUS_AEON_*`
 //! environment configuration.
 
+pub mod recall_v2;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
