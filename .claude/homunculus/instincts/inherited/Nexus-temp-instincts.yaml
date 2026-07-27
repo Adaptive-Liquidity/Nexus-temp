@@ -1,0 +1,357 @@
+# Instincts generated from https://github.com/Adaptive-Liquidity/Nexus-temp
+# Generated: 2026-07-27T15:47:48.920Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: Nexus-temp-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: test, feat
+
+## Evidence
+
+- 2 commits analyzed
+- Detected conventional commit pattern
+- Examples: test(aeon): define V2 component startup contract, feat(aeon): configure V2 verifier components
+
+---
+id: Nexus-temp-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Commit Length
+
+## Action
+
+Keep commit messages concise (~46 characters)
+
+## Evidence
+
+- Average commit message length: 46 chars
+- Based on 2 commits
+
+---
+id: Nexus-temp-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: Nexus-temp-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: Nexus-temp-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: Nexus-temp-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: nexus-temp-instinct-file-naming
+trigger: "When creating a new source file"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct File Naming
+
+## Action
+
+Name the file using snake_case
+
+## Evidence
+
+- Pattern in namingConventions.files: snake_case
+
+---
+id: nexus-temp-instinct-function-naming
+trigger: "When defining a new function"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Function Naming
+
+## Action
+
+Name the function using camelCase
+
+## Evidence
+
+- Pattern in namingConventions.functions: camelCase
+
+---
+id: nexus-temp-instinct-class-naming
+trigger: "When defining a new class or struct"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Class Naming
+
+## Action
+
+Name the class or struct using PascalCase
+
+## Evidence
+
+- Pattern in namingConventions.classes: PascalCase
+
+---
+id: nexus-temp-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Constant Naming
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE
+
+## Evidence
+
+- Pattern in namingConventions.constants: SCREAMING_SNAKE_CASE
+
+---
+id: nexus-temp-instinct-import-style
+trigger: "When importing modules"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Import Style
+
+## Action
+
+Use relative import paths
+
+## Evidence
+
+- Pattern in importStyle: relative
+
+---
+id: nexus-temp-instinct-export-style
+trigger: "When exporting modules or functions"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in exportStyle: named
+
+---
+id: nexus-temp-instinct-test-location
+trigger: "When adding new tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Test Location
+
+## Action
+
+Place test files in the separate 'tests' folder
+
+## Evidence
+
+- Pattern in folderStructure.testLocation: separate
+- Common folder: tests
+
+---
+id: nexus-temp-instinct-test-commit-prefix
+trigger: "When committing test-related changes"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Test Commit Prefix
+
+## Action
+
+Prefix the commit message with 'test'
+
+## Evidence
+
+- Seen in commit: test(aeon): define V2 component startup contract
+
+---
+id: nexus-temp-instinct-feat-commit-prefix
+trigger: "When committing new features"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Feat Commit Prefix
+
+## Action
+
+Prefix the commit message with 'feat'
+
+## Evidence
+
+- Seen in commit: feat(aeon): configure V2 verifier components
+
+---
+id: nexus-temp-instinct-commit-format
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Commit Format
+
+## Action
+
+Use the format: <type>(<scope>): <description>
+
+## Evidence
+
+- Pattern in commits.type: conventional
+- Seen in commit: feat(aeon): configure V2 verifier components
+
+---
+id: nexus-temp-instinct-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Commit Length
+
+## Action
+
+Keep the commit message around 46 characters on average
+
+## Evidence
+
+- Pattern in commits.averageLength: 46
+
+---
+id: nexus-temp-instinct-ci-config-location
+trigger: "When configuring CI workflows"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Ci Config Location
+
+## Action
+
+Place CI configuration files in .github/workflows/
+
+## Evidence
+
+- Pattern in configFiles: .github/workflows/ci.yml
+
