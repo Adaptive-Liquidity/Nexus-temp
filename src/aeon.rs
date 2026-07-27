@@ -7,6 +7,8 @@
 
 pub mod recall_v2;
 #[cfg(feature = "aeon-replay-postgres")]
+pub mod recall_v2_config;
+#[cfg(feature = "aeon-replay-postgres")]
 pub mod recall_v2_postgres;
 
 use std::path::{Path, PathBuf};

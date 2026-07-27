@@ -1,9 +1,17 @@
 #![cfg(feature = "aeon-replay-postgres")]
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use aeon_nexus_bridge::v2::to_lowercase_hex;
-use ed25519_dalek::SigningKey;
+use aeon_nexus_bridge::v2::{
+    recall_signed_payload_digest, recall_signing_bytes, to_lowercase_hex, RecallEnvelopeV2,
+};
+use async_trait::async_trait;
+use ed25519_dalek::{Signer, SigningKey};
+use nexus::aeon::recall_v2::{
+    Clock, ExpectedRecallContext, RecallVerificationPolicy, RecallVerifier, ReplayConsumeResult,
+    ReplayNamespace, ReplayStore, ReplayStoreError,
+};
 use nexus::aeon::recall_v2_config::{
     RecallV2ComponentConfig, RecallV2ComponentConfigError, RecallV2ConfigValues,
     RecallV2RuntimeMode, TrustedAeonKeyProvider, TrustedAeonKeyProviderError,
@@ -12,6 +20,33 @@ use serde_json::json;
 
 const DATABASE_URL: &str =
     "postgres://nexus_config:sensitive-password@db.internal.example/nexus_replay";
+const ISSUED_AT_MS: i64 = 1_760_000_000_000;
+const VECTOR_KEY_ID: &str = "test-key-0001";
+const VECTOR_PUBLIC_KEY_HEX: &str =
+    "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12";
+
+#[derive(Clone, Copy)]
+struct FixedClock(i64);
+
+impl Clock for FixedClock {
+    fn now_unix_ms(&self) -> i64 {
+        self.0
+    }
+}
+
+struct AlwaysFreshStore;
+
+#[async_trait]
+impl ReplayStore for AlwaysFreshStore {
+    async fn consume_once(
+        &self,
+        _namespace: ReplayNamespace,
+        _nonce: &str,
+        _expires_at_unix_ms: i64,
+    ) -> Result<ReplayConsumeResult, ReplayStoreError> {
+        Ok(ReplayConsumeResult::Fresh)
+    }
+}
 
 fn public_key_hex(seed: u8) -> String {
     to_lowercase_hex(
@@ -51,6 +86,23 @@ fn enforced_values(trusted_keys_json: Option<String>) -> RecallV2ConfigValues {
     }
 }
 
+fn expected_context() -> ExpectedRecallContext {
+    ExpectedRecallContext {
+        tenant_id: "tenant-0001".to_owned(),
+        workspace_id: None,
+        agent_id: "agent-0001".to_owned(),
+        session_id: Some("session-0001".to_owned()),
+        mission_id: None,
+        run_id: "9f1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d"
+            .parse()
+            .expect("canonical run id"),
+        request_id: "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+            .parse()
+            .expect("canonical request id"),
+        query: "what did we decide about retries?".to_owned(),
+    }
+}
+
 #[test]
 fn absent_mode_is_disabled_without_loading_production_components() {
     let config = RecallV2ComponentConfig::from_values(RecallV2ConfigValues::default())
@@ -82,6 +134,66 @@ fn enforced_mode_loads_only_explicitly_pinned_active_and_retired_keys() {
     assert!(trusted.contains_key("aeon-active-2026-07"));
     assert!(trusted.contains_key("aeon-retired-2026-06"));
     assert!(!trusted.contains_key("response-discovered-key"));
+}
+
+#[tokio::test]
+async fn active_and_retired_keys_both_verify_during_rotation_overlap() {
+    let retired_signing_key = SigningKey::from_bytes(&[0x43; 32]);
+    let document = json!({
+        "version": 1,
+        "keys": [
+            {
+                "key_id": VECTOR_KEY_ID,
+                "public_key_hex": VECTOR_PUBLIC_KEY_HEX,
+                "state": "active"
+            },
+            {
+                "key_id": "aeon-retired-overlap",
+                "public_key_hex": to_lowercase_hex(
+                    &retired_signing_key.verifying_key().to_bytes()
+                ),
+                "state": "retired"
+            }
+        ]
+    })
+    .to_string();
+    let config = RecallV2ComponentConfig::from_values(enforced_values(Some(document)))
+        .expect("valid rotation-overlap configuration");
+    let trusted_keys = config
+        .enforced()
+        .expect("enforced config")
+        .trusted_key_provider()
+        .load()
+        .expect("pinned keys")
+        .into_trusted_key_bundle();
+    let verifier = RecallVerifier::new(
+        trusted_keys,
+        RecallVerificationPolicy::new(5_000).expect("valid verification policy"),
+        FixedClock(ISSUED_AT_MS + 1_000),
+        Arc::new(AlwaysFreshStore),
+    );
+    let vector_json =
+        include_str!("../crates/aeon_nexus_bridge/vectors/recall_envelope_v2/envelope.json");
+    verifier
+        .verify_json(vector_json, &expected_context())
+        .await
+        .expect("active pinned key verifies");
+
+    let mut retired_envelope: RecallEnvelopeV2 =
+        serde_json::from_str(vector_json).expect("vector envelope");
+    retired_envelope.signature.key_id = "aeon-retired-overlap".to_owned();
+    retired_envelope.signature.signed_payload_digest =
+        recall_signed_payload_digest(&retired_envelope.payload).expect("payload digest");
+    let signing_bytes =
+        recall_signing_bytes(&retired_envelope.payload).expect("canonical signing bytes");
+    retired_envelope.signature.signature =
+        to_lowercase_hex(&retired_signing_key.sign(&signing_bytes).to_bytes());
+    let retired_json = serde_json::to_string(&retired_envelope).expect("retired envelope JSON");
+
+    verifier
+        .verify_json(&retired_json, &expected_context())
+        .await
+        .expect("explicitly pinned retired key verifies during overlap");
 }
 
 #[test]
