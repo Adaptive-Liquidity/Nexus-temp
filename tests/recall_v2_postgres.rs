@@ -441,6 +441,39 @@ async fn postgres_replay_store_live_database_contract() {
         ReplayConsumeResult::Replayed
     );
 
+    assert_eq!(
+        store
+            .consume_once(namespace_a, &nonce(6), 100)
+            .await
+            .expect("shorter-expiry consume"),
+        ReplayConsumeResult::Fresh
+    );
+    assert_eq!(
+        second_store
+            .consume_once(namespace_a, &nonce(6), 300)
+            .await
+            .expect("later-expiry replay"),
+        ReplayConsumeResult::Replayed
+    );
+    let extended_expiry: i64 = sqlx::query_scalar(
+        "SELECT expires_at_unix_ms
+         FROM public.nexus_recall_replay_nonces
+         WHERE replay_namespace = $1 AND nonce = $2",
+    )
+    .bind(namespace_a.as_bytes().as_slice())
+    .bind(nonce(6))
+    .fetch_one(&pool)
+    .await
+    .expect("conflict expiry is readable");
+    assert_eq!(extended_expiry, 300);
+    assert_eq!(
+        store
+            .purge_expired_before(200, 100)
+            .await
+            .expect("cleanup preserves the extended validity window"),
+        0
+    );
+
     for (value, expires_at) in [(10, 100), (11, 200), (12, 300), (13, 50), (14, 60)] {
         assert_eq!(
             store
