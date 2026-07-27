@@ -17,11 +17,12 @@ use nexus::aeon::recall_v2_config::{
     RecallV2RuntimeMode, TrustedAeonKeyProvider, TrustedAeonKeyProviderError,
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 const DATABASE_URL: &str =
     "postgres://nexus_config:sensitive-password@db.internal.example/nexus_replay";
 const ISSUED_AT_MS: i64 = 1_760_000_000_000;
-const VECTOR_KEY_ID: &str = "test-key-0001";
+const CANONICAL_KEY_ID_PREFIX: &str = "ed25519-sha256:";
 const VECTOR_PUBLIC_KEY_HEX: &str =
     "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12";
 
@@ -56,17 +57,31 @@ fn public_key_hex(seed: u8) -> String {
     )
 }
 
+fn canonical_key_id_from_hex(encoded: &str) -> String {
+    let public_key: Vec<u8> = (0..encoded.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&encoded[index..index + 2], 16).expect("valid test public key")
+        })
+        .collect();
+    let fingerprint = Sha256::digest(&public_key);
+    format!(
+        "{CANONICAL_KEY_ID_PREFIX}{}",
+        to_lowercase_hex(&fingerprint)
+    )
+}
+
 fn trusted_keys_json(active_key: &str, retired_key: &str) -> String {
     json!({
         "version": 1,
         "keys": [
             {
-                "key_id": "aeon-active-2026-07",
+                "key_id": canonical_key_id_from_hex(active_key),
                 "public_key_hex": active_key,
                 "state": "active"
             },
             {
-                "key_id": "aeon-retired-2026-06",
+                "key_id": canonical_key_id_from_hex(retired_key),
                 "public_key_hex": retired_key,
                 "state": "retired"
             }
@@ -116,6 +131,8 @@ fn absent_mode_is_disabled_without_loading_production_components() {
 fn enforced_mode_loads_only_explicitly_pinned_active_and_retired_keys() {
     let active_key = public_key_hex(0x31);
     let retired_key = public_key_hex(0x32);
+    let active_key_id = canonical_key_id_from_hex(&active_key);
+    let retired_key_id = canonical_key_id_from_hex(&retired_key);
     let config = RecallV2ComponentConfig::from_values(enforced_values(Some(trusted_keys_json(
         &active_key,
         &retired_key,
@@ -129,26 +146,35 @@ fn enforced_mode_loads_only_explicitly_pinned_active_and_retired_keys() {
 
     assert_eq!(config.mode(), RecallV2RuntimeMode::Enforced);
     assert_eq!(trusted.len(), 2);
-    assert_eq!(trusted.active_key_ids(), &["aeon-active-2026-07"]);
-    assert_eq!(trusted.retired_key_ids(), &["aeon-retired-2026-06"]);
-    assert!(trusted.contains_key("aeon-active-2026-07"));
-    assert!(trusted.contains_key("aeon-retired-2026-06"));
+    assert_eq!(
+        trusted.active_key_ids(),
+        std::slice::from_ref(&active_key_id)
+    );
+    assert_eq!(
+        trusted.retired_key_ids(),
+        std::slice::from_ref(&retired_key_id)
+    );
+    assert!(trusted.contains_key(&active_key_id));
+    assert!(trusted.contains_key(&retired_key_id));
     assert!(!trusted.contains_key("response-discovered-key"));
 }
 
 #[tokio::test]
 async fn active_and_retired_keys_both_verify_during_rotation_overlap() {
+    let active_signing_key = SigningKey::from_bytes(&[0x42; 32]);
     let retired_signing_key = SigningKey::from_bytes(&[0x43; 32]);
+    let active_key_id = canonical_key_id_from_hex(VECTOR_PUBLIC_KEY_HEX);
+    let retired_key_id = canonical_key_id_from_hex(&public_key_hex(0x43));
     let document = json!({
         "version": 1,
         "keys": [
             {
-                "key_id": VECTOR_KEY_ID,
+                "key_id": active_key_id,
                 "public_key_hex": VECTOR_PUBLIC_KEY_HEX,
                 "state": "active"
             },
             {
-                "key_id": "aeon-retired-overlap",
+                "key_id": retired_key_id,
                 "public_key_hex": to_lowercase_hex(
                     &retired_signing_key.verifying_key().to_bytes()
                 ),
@@ -174,14 +200,22 @@ async fn active_and_retired_keys_both_verify_during_rotation_overlap() {
     );
     let vector_json =
         include_str!("../crates/aeon_nexus_bridge/vectors/recall_envelope_v2/envelope.json");
+    let mut active_envelope: RecallEnvelopeV2 =
+        serde_json::from_str(vector_json).expect("vector envelope");
+    active_envelope.signature.key_id = active_key_id;
+    let signing_bytes =
+        recall_signing_bytes(&active_envelope.payload).expect("canonical signing bytes");
+    active_envelope.signature.signature =
+        to_lowercase_hex(&active_signing_key.sign(&signing_bytes).to_bytes());
+    let active_json = serde_json::to_string(&active_envelope).expect("active envelope JSON");
     verifier
-        .verify_json(vector_json, &expected_context())
+        .verify_json(&active_json, &expected_context())
         .await
         .expect("active pinned key verifies");
 
     let mut retired_envelope: RecallEnvelopeV2 =
         serde_json::from_str(vector_json).expect("vector envelope");
-    retired_envelope.signature.key_id = "aeon-retired-overlap".to_owned();
+    retired_envelope.signature.key_id = retired_key_id;
     retired_envelope.signature.signed_payload_digest =
         recall_signed_payload_digest(&retired_envelope.payload).expect("payload digest");
     let signing_bytes =
@@ -223,7 +257,7 @@ fn key_document_is_strict_and_requires_an_active_rotation_root() {
     let only_retired = json!({
         "version": 1,
         "keys": [{
-            "key_id": "retired-only",
+            "key_id": canonical_key_id_from_hex(&public_key_hex(0x35)),
             "public_key_hex": public_key_hex(0x35),
             "state": "retired"
         }]
@@ -239,7 +273,7 @@ fn key_document_is_strict_and_requires_an_active_rotation_root() {
     let unknown_field = json!({
         "version": 1,
         "keys": [{
-            "key_id": "active",
+            "key_id": canonical_key_id_from_hex(&public_key_hex(0x36)),
             "public_key_hex": public_key_hex(0x36),
             "state": "active",
             "discovered_from_response": true
@@ -257,11 +291,12 @@ fn key_document_is_strict_and_requires_an_active_rotation_root() {
 #[test]
 fn duplicate_ids_or_physical_keys_and_noncanonical_hex_are_rejected() {
     let public_key = public_key_hex(0x37);
+    let key_id = canonical_key_id_from_hex(&public_key);
     let duplicate_id = json!({
         "version": 1,
         "keys": [
-            {"key_id": "duplicate", "public_key_hex": public_key, "state": "active"},
-            {"key_id": "duplicate", "public_key_hex": public_key_hex(0x38), "state": "retired"}
+            {"key_id": key_id.clone(), "public_key_hex": public_key, "state": "active"},
+            {"key_id": key_id, "public_key_hex": public_key, "state": "retired"}
         ]
     })
     .to_string();
@@ -275,7 +310,7 @@ fn duplicate_ids_or_physical_keys_and_noncanonical_hex_are_rejected() {
     let duplicate_physical_key = json!({
         "version": 1,
         "keys": [
-            {"key_id": "active-alias", "public_key_hex": public_key, "state": "active"},
+            {"key_id": canonical_key_id_from_hex(&public_key), "public_key_hex": public_key, "state": "active"},
             {"key_id": "retired-alias", "public_key_hex": public_key, "state": "retired"}
         ]
     })
@@ -284,14 +319,17 @@ fn duplicate_ids_or_physical_keys_and_noncanonical_hex_are_rejected() {
         .expect_err("one physical key must not have conflicting lifecycle aliases");
     assert!(matches!(
         error,
-        RecallV2ComponentConfigError::TrustedKeys(TrustedAeonKeyProviderError::DuplicatePublicKey)
+        RecallV2ComponentConfigError::TrustedKeys(
+            TrustedAeonKeyProviderError::NonCanonicalKeyId { .. }
+        )
     ));
 
+    let uppercase_key = public_key_hex(0x39);
     let uppercase = json!({
         "version": 1,
         "keys": [{
-            "key_id": "uppercase",
-            "public_key_hex": public_key_hex(0x39).to_uppercase(),
+            "key_id": canonical_key_id_from_hex(&uppercase_key),
+            "public_key_hex": uppercase_key.to_uppercase(),
             "state": "active"
         }]
     })
