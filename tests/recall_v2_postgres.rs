@@ -23,6 +23,7 @@ use nexus::aeon::recall_v2_postgres::{
     POSTGRES_REPLAY_TABLE,
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use tokio::sync::Barrier;
@@ -33,6 +34,7 @@ const ALLOW_RESET_ENV: &str = "NEXUS_ALLOW_POSTGRES_REPLAY_TEST_RESET";
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
 const ISSUED_AT_MS: i64 = 1_760_000_000_000;
 const VECTOR_KEY_ID: &str = "test-key-0001";
+const CANONICAL_KEY_ID_PREFIX: &str = "ed25519-sha256:";
 const VECTOR_PUBLIC_KEY: [u8; 32] = [
     0x21, 0x52, 0xf8, 0xd1, 0x9b, 0x79, 0x1d, 0x24, 0x45, 0x32, 0x42, 0xe1, 0x5f, 0x2e, 0xab, 0x6c,
     0xb7, 0xcf, 0xfa, 0x7b, 0x6a, 0x5e, 0xd3, 0x00, 0x97, 0x96, 0x0e, 0x06, 0x98, 0x81, 0xdb, 0x12,
@@ -126,19 +128,28 @@ async fn replay_namespaces() -> (ReplayNamespace, ReplayNamespace) {
 fn nonce(value: u64) -> String {
     format!("{value:064x}")
 }
+fn canonical_key_id(public_key: &[u8; 32]) -> String {
+    let fingerprint: [u8; 32] = Sha256::digest(public_key).into();
+    format!(
+        "{CANONICAL_KEY_ID_PREFIX}{}",
+        to_lowercase_hex(&fingerprint)
+    )
+}
+
 fn component_config(database_url: &str, connect_timeout_ms: u64) -> RecallV2ComponentConfig {
     let second_key = SigningKey::from_bytes(&[0x5a; 32]);
+    let second_public_key = second_key.verifying_key().to_bytes();
     let trusted_keys_json = json!({
         "version": 1,
         "keys": [
             {
-                "key_id": VECTOR_KEY_ID,
+                "key_id": canonical_key_id(&VECTOR_PUBLIC_KEY),
                 "public_key_hex": to_lowercase_hex(&VECTOR_PUBLIC_KEY),
                 "state": "active"
             },
             {
-                "key_id": "test-key-retired",
-                "public_key_hex": to_lowercase_hex(&second_key.verifying_key().to_bytes()),
+                "key_id": canonical_key_id(&second_public_key),
+                "public_key_hex": to_lowercase_hex(&second_public_key),
                 "state": "retired"
             }
         ]
@@ -375,13 +386,18 @@ async fn postgres_replay_store_live_database_contract() {
     let RecallV2Components::Enforced(enforced_components) = &components else {
         panic!("enforced mode must not fall back to disabled components");
     };
+    let active_key_id = canonical_key_id(&VECTOR_PUBLIC_KEY);
+    let retired_public_key = SigningKey::from_bytes(&[0x5a; 32])
+        .verifying_key()
+        .to_bytes();
+    let retired_key_id = canonical_key_id(&retired_public_key);
     assert_eq!(
         enforced_components.trusted_keys().active_key_ids(),
-        &[VECTOR_KEY_ID]
+        &[active_key_id]
     );
     assert_eq!(
         enforced_components.trusted_keys().retired_key_ids(),
-        &["test-key-retired"]
+        &[retired_key_id]
     );
     assert_eq!(
         enforced_components.replay_store().operation_timeout(),

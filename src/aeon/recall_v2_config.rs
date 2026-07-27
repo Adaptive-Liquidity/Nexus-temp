@@ -12,6 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use aeon_nexus_bridge::v2::to_lowercase_hex;
 use serde::Deserialize;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
@@ -26,6 +27,7 @@ pub const RECALL_V2_CONNECT_TIMEOUT_MS_ENV: &str = "NEXUS_RECALL_V2_CONNECT_TIME
 pub const RECALL_V2_OPERATION_TIMEOUT_MS_ENV: &str = "NEXUS_RECALL_V2_OPERATION_TIMEOUT_MS";
 
 const TRUSTED_KEY_DOCUMENT_VERSION: u32 = 1;
+const CANONICAL_KEY_ID_PREFIX: &str = "ed25519-sha256:";
 const DEFAULT_POOL_MAX_CONNECTIONS: u32 = 8;
 const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_OPERATION_TIMEOUT_MS: u64 = 5_000;
@@ -268,15 +270,22 @@ impl PinnedTrustedAeonKeyProvider {
             if record.key_id.is_empty() {
                 return Err(TrustedAeonKeyProviderError::EmptyKeyId);
             }
+            let public_key = decode_public_key(&record.key_id, &record.public_key_hex)?;
+            let trusted_key = TrustedKey::from_bytes(record.key_id.clone(), public_key)
+                .map_err(|error| map_trusted_key_error(record.key_id.clone(), error))?;
+            let canonical_key_id = canonical_key_id(&trusted_key.public_key_fingerprint());
+            if record.key_id != canonical_key_id {
+                return Err(TrustedAeonKeyProviderError::NonCanonicalKeyId {
+                    supplied: record.key_id,
+                    expected: canonical_key_id,
+                });
+            }
             if !key_ids.insert(record.key_id.clone()) {
                 return Err(TrustedAeonKeyProviderError::DuplicateKeyId(record.key_id));
             }
-            let public_key = decode_public_key(&record.key_id, &record.public_key_hex)?;
             if !public_keys.insert(public_key) {
                 return Err(TrustedAeonKeyProviderError::DuplicatePublicKey);
             }
-            let trusted_key = TrustedKey::from_bytes(record.key_id.clone(), public_key)
-                .map_err(|error| map_trusted_key_error(record.key_id.clone(), error))?;
             match record.state {
                 PinnedAeonKeyState::Active => active_key_ids.push(record.key_id),
                 PinnedAeonKeyState::Retired => retired_key_ids.push(record.key_id),
@@ -466,6 +475,8 @@ pub enum TrustedAeonKeyProviderError {
     EmptyKeyId,
     #[error("pinned AEON key id is duplicated")]
     DuplicateKeyId(String),
+    #[error("pinned AEON key id must equal the Ed25519 public-key fingerprint")]
+    NonCanonicalKeyId { supplied: String, expected: String },
     #[error("one Ed25519 public key must not be configured under multiple key ids")]
     DuplicatePublicKey,
     #[error("pinned AEON public key must be exactly 64 lowercase hexadecimal characters")]
@@ -570,6 +581,13 @@ fn decode_public_key(key_id: &str, encoded: &str) -> Result<[u8; 32], TrustedAeo
         decoded[index] = (decode_nibble(pair[0]) << 4) | decode_nibble(pair[1]);
     }
     Ok(decoded)
+}
+
+fn canonical_key_id(public_key_fingerprint: &[u8; 32]) -> String {
+    format!(
+        "{CANONICAL_KEY_ID_PREFIX}{}",
+        to_lowercase_hex(public_key_fingerprint)
+    )
 }
 
 fn decode_nibble(byte: u8) -> u8 {
