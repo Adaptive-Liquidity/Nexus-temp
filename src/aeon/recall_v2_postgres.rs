@@ -442,7 +442,7 @@ async fn validate_schema(
             "SELECT has_table_privilege(
                         current_user,
                         'public.nexus_recall_replay_nonces',
-                        'SELECT,INSERT,DELETE'
+                        'SELECT,INSERT,DELETE,UPDATE'
                     )",
         )
         .fetch_one(pool),
@@ -450,7 +450,7 @@ async fn validate_schema(
     .await?;
     if !privileges {
         return Err(PostgresReplayStoreError::SchemaContract(
-            "current database role lacks SELECT, INSERT, or DELETE",
+            "current database role lacks SELECT, INSERT, DELETE, or UPDATE",
         ));
     }
 
