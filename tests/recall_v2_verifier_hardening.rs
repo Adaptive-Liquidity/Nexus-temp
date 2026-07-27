@@ -4,8 +4,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use aeon_nexus_bridge::v2::{
-    recall_signed_payload_digest, recall_signing_bytes, to_lowercase_hex, RecallEnvelopeV2,
-    RecallEnvelopeV2Payload, RecallError, RECALL_MAX_TTL_MS,
+    recall_signed_payload_digest, recall_signing_bytes, to_lowercase_hex, RecallDigestV2,
+    RecallEnvelopeV2, RecallEnvelopeV2Payload, RecallError, RECALL_MAX_TTL_MS,
 };
 use async_trait::async_trait;
 use ed25519_dalek::{Signer, SigningKey};
@@ -230,4 +230,17 @@ async fn tenants_have_distinct_replay_namespaces() {
         .verify_json(&second_envelope, &second_context)
         .await
         .expect("same nonce under a different tenant namespace must be fresh");
+}
+
+#[tokio::test]
+async fn private_query_digest_disclosure_flag_is_accepted() {
+    let verifier = verifier_with_keys([vector_key(KEY_ID)]);
+    let envelope = resign_envelope(KEY_ID, [0x42; 32], |payload| {
+        payload.query_digest = RecallDigestV2::sha256(QUERY.as_bytes(), false);
+    });
+
+    verifier
+        .verify_json(&envelope, &expected_context())
+        .await
+        .expect("query digest disclosure policy must not alter query binding");
 }

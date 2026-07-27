@@ -482,7 +482,7 @@ fn verify_context(
     )?;
     let expected_query_digest = RecallDigestV2::sha256(expected.query.as_bytes(), true);
     require_context(
-        payload.query_digest == expected_query_digest,
+        payload.query_digest.value() == expected_query_digest.value(),
         ContextField::QueryDigest,
     )
 }
