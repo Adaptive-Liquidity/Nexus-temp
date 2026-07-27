@@ -1,0 +1,431 @@
+# Instincts generated from https://github.com/Adaptive-Liquidity/Nexus-temp
+# Generated: 2026-07-27T13:58:37.158Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: Nexus-temp-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: test, feat, ci, fix
+
+## Evidence
+
+- 5 commits analyzed
+- Detected conventional commit pattern
+- Examples: test(aeon): define postgres replay store contract, feat(aeon): add postgres replay store backend
+
+---
+id: Nexus-temp-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Commit Length
+
+## Action
+
+Keep commit messages concise (~47 characters)
+
+## Evidence
+
+- Average commit message length: 47 chars
+- Based on 5 commits
+
+---
+id: Nexus-temp-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: Nexus-temp-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: Nexus-temp-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: Nexus-temp-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: Nexus-temp-workflow-add-or-update-postgres-replay-store-backend
+trigger: "when doing add or update postgres replay store backend"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Workflow Add Or Update Postgres Replay Store Backend
+
+## Action
+
+Follow the add-or-update-postgres-replay-store-backend workflow:
+1. Create or update SQL migration for replay store
+2. Implement or modify backend logic in src/aeon/recall_v2_postgres.rs
+3. Update or add tests in tests/recall_v2_postgres.rs
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: migrations/0001_recall_replay_store.sql, src/aeon/recall_v2_postgres.rs, tests/recall_v2_postgres.rs
+
+---
+id: Nexus-temp-workflow-define-and-harden-contracts-with-tests
+trigger: "when doing define and harden contracts with tests"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Workflow Define And Harden Contracts With Tests
+
+## Action
+
+Follow the define-and-harden-contracts-with-tests workflow:
+1. Update Cargo.toml for dependencies
+2. Modify or define contract in src/aeon.rs or src/aeon/recall_v2_postgres.rs
+3. Update or add tests in tests/recall_v2_postgres.rs
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: Cargo.toml, src/aeon.rs, src/aeon/recall_v2_postgres.rs
+
+---
+id: nexus-temp-instinct-file-naming
+trigger: "When creating or renaming a file"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct File Naming
+
+## Action
+
+Use snake_case for file names
+
+## Evidence
+
+- Pattern in src/aeon/recall_v2_postgres.rs
+- Pattern in tests/recall_v2_postgres.rs
+
+---
+id: nexus-temp-instinct-function-naming
+trigger: "When defining a function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- Pattern in Rust code style conventions
+- Pattern in src/aeon/recall_v2_postgres.rs
+
+---
+id: nexus-temp-instinct-class-naming
+trigger: "When defining a class or struct"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Class Naming
+
+## Action
+
+Use PascalCase for class/struct names
+
+## Evidence
+
+- Pattern in Rust code style conventions
+
+---
+id: nexus-temp-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- Pattern in Rust code style conventions
+
+---
+id: nexus-temp-instinct-import-style
+trigger: "When importing modules"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Import Style
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- Pattern in src/aeon/recall_v2_postgres.rs
+
+---
+id: nexus-temp-instinct-export-style
+trigger: "When exporting functions or types"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in src/aeon/recall_v2_postgres.rs
+
+---
+id: nexus-temp-instinct-test-location
+trigger: "When adding or updating tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Test Location
+
+## Action
+
+Place tests in the separate 'tests' directory
+
+## Evidence
+
+- Pattern in tests/recall_v2_postgres.rs
+- Architecture: testLocation is 'separate'
+
+---
+id: nexus-temp-instinct-test-naming
+trigger: "When naming a test file"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Test Naming
+
+## Action
+
+Use snake_case and match the module being tested
+
+## Evidence
+
+- Pattern in tests/recall_v2_postgres.rs
+
+---
+id: nexus-temp-instinct-test-update-after-logic
+trigger: "When implementing or modifying backend logic"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Test Update After Logic
+
+## Action
+
+Update or add corresponding tests in the tests directory
+
+## Evidence
+
+- Workflow: add-or-update-postgres-replay-store-backend
+- Workflow: define-and-harden-contracts-with-tests
+
+---
+id: nexus-temp-instinct-git-commit-format
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Git Commit Format
+
+## Action
+
+Use Conventional Commits with prefixes: test, feat, ci, fix; include scope in parentheses if relevant
+
+## Evidence
+
+- Seen in commit: test(aeon): define postgres replay store contract
+- Seen in commit: feat(aeon): add postgres replay store backend
+- Seen in commit: ci: require live postgres replay store proof
+- Seen in commit: fix(aeon): validate replay cleanup privileges
+
+---
+id: nexus-temp-instinct-git-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Git Commit Length
+
+## Action
+
+Keep commit message length around 47 characters on average
+
+## Evidence
+
+- commits.averageLength: 47
+
+---
+id: nexus-temp-instinct-workflow-add-replay-store-backend
+trigger: "When someone wants to add or update the Postgres replay store backend in Aeon"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Workflow Add Replay Store Backend
+
+## Action
+
+Follow steps: 1) Create or update SQL migration in migrations/0001_recall_replay_store.sql, 2) Implement or modify backend logic in src/aeon/recall_v2_postgres.rs, 3) Update or add tests in tests/recall_v2_postgres.rs
+
+## Evidence
+
+- Workflow: add-or-update-postgres-replay-store-backend
+- Seen in commit sequence and file patterns
+
+---
+id: nexus-temp-instinct-workflow-define-contracts
+trigger: "When someone wants to define or strengthen the contract for a component"
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: Adaptive-Liquidity/Nexus-temp
+---
+
+# Nexus Temp Instinct Workflow Define Contracts
+
+## Action
+
+Follow steps: 1) Update Cargo.toml for dependencies, 2) Modify or define contract in src/aeon.rs or src/aeon/recall_v2_postgres.rs, 3) Update or add tests in tests/recall_v2_postgres.rs
+
+## Evidence
+
+- Workflow: define-and-harden-contracts-with-tests
+- Seen in commit sequence and file patterns
+
