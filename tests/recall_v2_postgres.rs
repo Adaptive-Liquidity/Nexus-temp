@@ -400,7 +400,11 @@ async fn postgres_replay_store_live_database_contract() {
         tokio::spawn(async move {
             barrier.wait().await;
             store
-                .consume_once(namespace_a, &nonce(4), ISSUED_AT_MS + 30_000)
+                .consume_once(
+                    namespace_a,
+                    &nonce(4),
+                    ISSUED_AT_MS + 30_000 + i64::from(attempt),
+                )
                 .await
                 .expect("multi-pool consume")
         })
@@ -412,6 +416,17 @@ async fn postgres_replay_store_live_database_contract() {
         .filter(|result| *result == ReplayConsumeResult::Fresh)
         .count();
     assert_eq!(multi_pool_fresh, 1);
+    let multi_pool_expiry: i64 = sqlx::query_scalar(
+        "SELECT expires_at_unix_ms
+         FROM public.nexus_recall_replay_nonces
+         WHERE replay_namespace = $1 AND nonce = $2",
+    )
+    .bind(namespace_a.as_bytes().as_slice())
+    .bind(nonce(4))
+    .fetch_one(&pool)
+    .await
+    .expect("multi-pool expiry is readable");
+    assert_eq!(multi_pool_expiry, ISSUED_AT_MS + 30_031);
 
     let restart_pool = connect(&database_url, 2).await;
     let restart_store = PostgresReplayStore::new(restart_pool.clone(), OPERATION_TIMEOUT)
