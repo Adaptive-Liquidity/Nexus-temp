@@ -103,6 +103,9 @@ ai-recovery = ["dep:reqwest", "dep:tokio-util"]
 # Route ai-recovery OpenAI-compatible requests through the AEON-IQ memory proxy.
 # Off by default; enabling it also enables the ai-recovery HTTP lane.
 aeon-memory = ["ai-recovery", "dep:aeon_nexus_bridge"]
+# Production PostgreSQL ReplayStore foundation for authenticated AEON recall.
+# This does not wire the verifier into the runtime recall path.
+aeon-replay-postgres = ["aeon-memory", "dep:sqlx"]
 # Optional PostgreSQL-backed tenant registry for MCP HTTP auth.
 tenant-registry-postgres = ["dep:sqlx", "dep:arc-swap"]
 

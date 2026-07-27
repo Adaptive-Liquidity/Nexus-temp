@@ -6,6 +6,8 @@
 //! environment configuration.
 
 pub mod recall_v2;
+#[cfg(feature = "aeon-replay-postgres")]
+pub mod recall_v2_postgres;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Once};
