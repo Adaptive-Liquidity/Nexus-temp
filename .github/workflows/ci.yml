@@ -274,6 +274,80 @@ jobs:
 
           echo "Confirmed: the tenant-registry test executed against the live database."
 
+  # Shared replay consumption is meaningful only when the test reaches one
+  # PostgreSQL service from multiple independent pools. The exact rerun and
+  # marker assertions make a missing URL or silent skip a hard failure.
+  replay-store-postgres-tests:
+    name: recall replay store (live PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_USER: nexus_ci
+          POSTGRES_PASSWORD: nexus_ci
+          POSTGRES_DB: nexus_replay_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexus_ci -d nexus_replay_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      NEXUS_RECALL_REPLAY_TEST_DATABASE_URL: postgres://nexus_ci:nexus_ci@127.0.0.1:5432/nexus_replay_ci
+      NEXUS_REQUIRE_POSTGRES_REPLAY_TESTS: "1"
+      NEXUS_ALLOW_POSTGRES_REPLAY_TEST_RESET: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable branch as of 2026-06-16
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: cargo clippy --features aeon-replay-postgres
+        run: |
+          cargo clippy --all-targets \
+            --features aeon-replay-postgres \
+            --locked -- -D warnings
+
+      - name: cargo test --features aeon-replay-postgres
+        run: |
+          cargo test --all-targets \
+            --features aeon-replay-postgres \
+            --locked
+
+      - name: replay-store test must have executed against PostgreSQL
+        run: |
+          set -euo pipefail
+          cargo test \
+            --features aeon-replay-postgres \
+            --locked --test recall_v2_postgres \
+            postgres_replay_store_live_database_contract \
+            -- --exact --nocapture 2>&1 | tee /tmp/replay-store-test.log
+
+          log=/tmp/replay-store-test.log
+
+          if grep -q '^SKIP: PostgreSQL replay-store' "$log"; then
+            echo "::error::The PostgreSQL replay-store test skipped"
+            exit 1
+          fi
+
+          grep -q '^POSTGRES_REPLAY_LIVE_DB_REACHED ' "$log" || {
+            echo "::error::The replay-store test did not visibly reach PostgreSQL"
+            exit 1
+          }
+
+          grep -q 'test result: ok\. 1 passed' "$log" || {
+            echo "::error::postgres_replay_store_live_database_contract did not pass"
+            exit 1
+          }
+
+          echo "Confirmed: shared replay-store tests executed against PostgreSQL."
+
   dockerfile-lint:
     name: Nexus image build (no push)
     runs-on: ubuntu-latest
