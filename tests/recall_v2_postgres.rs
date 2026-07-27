@@ -15,7 +15,8 @@ use nexus::aeon::recall_v2::{
     ReplayNamespace, ReplayStore, ReplayStoreError, TrustedKey, TrustedKeyBundle,
 };
 use nexus::aeon::recall_v2_postgres::{
-    PostgresReplayStore, POSTGRES_REPLAY_SCHEMA_VERSION, POSTGRES_REPLAY_TABLE,
+    PostgresReplayStore, MAX_PURGE_BATCH_SIZE, POSTGRES_REPLAY_SCHEMA_VERSION,
+    POSTGRES_REPLAY_TABLE,
 };
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
@@ -279,6 +280,12 @@ async fn postgres_replay_store_live_database_contract() {
 
     reset_replay_schema(&pool).await;
     assert!(
+        PostgresReplayStore::new(pool.clone(), Duration::ZERO)
+            .await
+            .is_err(),
+        "zero operation timeout must fail before schema access"
+    );
+    assert!(
         PostgresReplayStore::new(pool.clone(), OPERATION_TIMEOUT)
             .await
             .is_err(),
@@ -293,12 +300,53 @@ async fn postgres_replay_store_live_database_contract() {
         .expect("migration is idempotent");
     assert_schema_contract(&pool).await;
 
+    sqlx::query(
+        "UPDATE public.nexus_recall_replay_schema
+         SET schema_version = 2
+         WHERE schema_name = 'nexus.recall.replay'",
+    )
+    .execute(&pool)
+    .await
+    .expect("test can set an unsupported schema version");
+    assert!(
+        PostgresReplayStore::new(pool.clone(), OPERATION_TIMEOUT)
+            .await
+            .is_err(),
+        "unsupported schema version must fail construction"
+    );
+    sqlx::query("UPDATE public.nexus_recall_replay_schema SET schema_version = 1")
+        .execute(&pool)
+        .await
+        .expect("test restores supported schema version");
+
     let store = Arc::new(
         PostgresReplayStore::new(pool.clone(), OPERATION_TIMEOUT)
             .await
             .expect("migrated schema constructs a store"),
     );
     let (namespace_a, namespace_b) = replay_namespaces().await;
+    assert_eq!(store.operation_timeout(), OPERATION_TIMEOUT);
+
+    let exhausted_pool = connect(&database_url, 1).await;
+    let exhausted_store =
+        PostgresReplayStore::new(exhausted_pool.clone(), Duration::from_millis(250))
+            .await
+            .expect("pool-exhaustion store constructs");
+    let held_connection = exhausted_pool
+        .acquire()
+        .await
+        .expect("test holds the only pooled connection");
+    let exhausted = exhausted_store
+        .consume_once(namespace_a, &nonce(40), ISSUED_AT_MS + 30_000)
+        .await
+        .expect_err("pool exhaustion must fail closed");
+    assert!(exhausted
+        .source()
+        .expect("timeout error has source")
+        .to_string()
+        .contains("timed out"));
+    drop(held_connection);
+    exhausted_pool.close().await;
 
     assert_eq!(
         store
@@ -497,6 +545,37 @@ async fn postgres_replay_store_live_database_contract() {
         .expect("input error has source")
         .to_string()
         .contains("nonce"));
+    let invalid_expiry = failure_store
+        .consume_once(namespace_a, &nonce(32), -1)
+        .await
+        .expect_err("negative expiry is rejected before SQL");
+    assert!(invalid_expiry
+        .source()
+        .expect("expiry error has source")
+        .to_string()
+        .contains("expiry"));
+    assert!(failure_store
+        .consume_once(namespace_a, &"A".repeat(64), ISSUED_AT_MS + 30_000,)
+        .await
+        .is_err());
+    assert!(failure_store
+        .purge_expired_before(-1, 1)
+        .await
+        .expect_err("negative cutoff rejected before SQL")
+        .to_string()
+        .contains("cutoff"));
+    assert!(failure_store
+        .purge_expired_before(0, 0)
+        .await
+        .expect_err("zero batch rejected before SQL")
+        .to_string()
+        .contains("batch size"));
+    assert!(failure_store
+        .purge_expired_before(0, MAX_PURGE_BATCH_SIZE + 1)
+        .await
+        .expect_err("oversized batch rejected before SQL")
+        .to_string()
+        .contains("batch size"));
     assert!(
         failure_store
             .consume_once(namespace_a, &nonce(30), ISSUED_AT_MS + 30_000)
@@ -517,6 +596,32 @@ async fn postgres_replay_store_live_database_contract() {
     assert!(
         wrong_namespace.is_err(),
         "database rejects malformed namespace"
+    );
+    let wrong_nonce = sqlx::query(
+        "INSERT INTO public.nexus_recall_replay_nonces
+         (replay_namespace, nonce, expires_at_unix_ms)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(namespace_a.as_bytes().as_slice())
+    .bind("A".repeat(64))
+    .bind(ISSUED_AT_MS + 30_000)
+    .execute(&pool)
+    .await;
+    assert!(wrong_nonce.is_err(), "database rejects malformed nonce");
+
+    let missing_table_store = PostgresReplayStore::new(pool.clone(), OPERATION_TIMEOUT)
+        .await
+        .expect("store constructs before table removal");
+    sqlx::query("DROP TABLE public.nexus_recall_replay_nonces")
+        .execute(&pool)
+        .await
+        .expect("test removes replay table");
+    assert!(
+        missing_table_store
+            .consume_once(namespace_a, &nonce(33), ISSUED_AT_MS + 30_000)
+            .await
+            .is_err(),
+        "missing table must fail closed at operation time"
     );
 
     second_pool.close().await;

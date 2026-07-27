@@ -25,7 +25,7 @@ const CONSUME_CLEANUP_LOCK_KEY: i64 = 5_640_004_627_203_514_945;
 
 const CONSUME_SQL: &str = "
 WITH replay_guard AS MATERIALIZED (
-    SELECT pg_advisory_xact_lock_shared(5640004627203514945)
+    SELECT pg_advisory_xact_lock_shared($4)
 ),
 inserted AS (
     INSERT INTO public.nexus_recall_replay_nonces
@@ -40,7 +40,7 @@ SELECT TRUE FROM inserted
 
 const PURGE_SQL: &str = "
 WITH replay_guard AS MATERIALIZED (
-    SELECT pg_advisory_xact_lock(5640004627203514945)
+    SELECT pg_advisory_xact_lock($3)
 ),
 expired AS MATERIALIZED (
     SELECT replay.replay_namespace, replay.nonce
@@ -122,6 +122,7 @@ impl PostgresReplayStore {
             sqlx::query_scalar(PURGE_SQL)
                 .bind(safe_cutoff_unix_ms)
                 .bind(i64::from(batch_size))
+                .bind(CONSUME_CLEANUP_LOCK_KEY)
                 .fetch_one(&self.pool),
         )
         .await?;
@@ -155,6 +156,7 @@ impl ReplayStore for PostgresReplayStore {
                 .bind(replay_namespace.as_bytes().as_slice())
                 .bind(nonce)
                 .bind(expires_at_unix_ms)
+                .bind(CONSUME_CLEANUP_LOCK_KEY)
                 .fetch_optional(&self.pool),
         )
         .await
@@ -321,11 +323,11 @@ async fn validate_schema(
         });
     }
 
-    let columns: Vec<(String, String, String)> = timeout_sqlx(
+    let columns: Vec<(String, String, String, Option<String>)> = timeout_sqlx(
         operation_timeout,
         "inspect replay table columns",
         sqlx::query_as(
-            "SELECT column_name, data_type, is_nullable
+            "SELECT column_name, data_type, is_nullable, column_default
              FROM information_schema.columns
              WHERE table_schema = 'public' AND table_name = $1",
         )
@@ -348,32 +350,68 @@ async fn validate_schema(
             ));
         }
     }
+    if !columns.iter().any(|column| {
+        column.0 == "first_consumed_at"
+            && column
+                .3
+                .as_deref()
+                .is_some_and(|default| default.contains("clock_timestamp()"))
+    }) {
+        return Err(PostgresReplayStoreError::SchemaContract(
+            "first_consumed_at must use the database consumption timestamp default",
+        ));
+    }
 
-    let constraints: Vec<(String, String, bool)> = timeout_sqlx(
+    let constraints: Vec<(String, String, bool, String)> = timeout_sqlx(
         operation_timeout,
         "inspect replay table constraints",
         sqlx::query_as(
-            "SELECT conname, contype::text, convalidated
+            "SELECT conname, contype::text, convalidated, pg_get_constraintdef(oid)
              FROM pg_constraint
              WHERE conrelid = 'public.nexus_recall_replay_nonces'::regclass",
         )
         .fetch_all(pool),
     )
     .await?;
-    for (name, kind) in [
-        ("nexus_recall_replay_nonces_pkey", "p"),
-        ("nexus_recall_replay_namespace_length", "c"),
-        ("nexus_recall_replay_nonce_shape", "c"),
-        ("nexus_recall_replay_expiry_nonnegative", "c"),
+    for (name, kind, definition_fragment) in [
+        (
+            "nexus_recall_replay_nonces_pkey",
+            "p",
+            "PRIMARY KEY (replay_namespace, nonce)",
+        ),
+        (
+            "nexus_recall_replay_namespace_length",
+            "c",
+            "octet_length(replay_namespace) = 32",
+        ),
+        (
+            "nexus_recall_replay_nonce_shape",
+            "c",
+            "octet_length(nonce) = 64",
+        ),
+        (
+            "nexus_recall_replay_expiry_nonnegative",
+            "c",
+            "expires_at_unix_ms >= 0",
+        ),
     ] {
-        if !constraints
-            .iter()
-            .any(|constraint| constraint.0 == name && constraint.1 == kind && constraint.2)
-        {
+        if !constraints.iter().any(|constraint| {
+            constraint.0 == name
+                && constraint.1 == kind
+                && constraint.2
+                && constraint.3.contains(definition_fragment)
+        }) {
             return Err(PostgresReplayStoreError::SchemaContract(
-                "required replay constraint is absent, invalid, or unvalidated",
+                "required replay constraint is absent, malformed, or unvalidated",
             ));
         }
+    }
+    if !constraints.iter().any(|constraint| {
+        constraint.0 == "nexus_recall_replay_nonce_shape" && constraint.3.contains("^[0-9a-f]{64}$")
+    }) {
+        return Err(PostgresReplayStoreError::SchemaContract(
+            "replay nonce constraint does not enforce lowercase hexadecimal",
+        ));
     }
 
     let expiry_index: Option<String> = timeout_sqlx(
@@ -438,6 +476,5 @@ async fn validate_schema(
         ));
     }
 
-    debug_assert_eq!(CONSUME_CLEANUP_LOCK_KEY, 5_640_004_627_203_514_945);
     Ok(())
 }
