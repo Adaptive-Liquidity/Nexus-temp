@@ -469,6 +469,22 @@ fn schema_accepts_explicit_null() {
     );
 }
 
+/// `-?(0|[1-9][0-9]*)` — the frozen integer-token rule from PROTOCOL.md §4.8.
+///
+/// Hand-rolled rather than pulled from a regex crate so the conformance vector
+/// is checked against the rule as written in the protocol, without adding a
+/// dependency this crate deliberately does not carry.
+fn is_canonical_integer_token(token: &str) -> bool {
+    let digits = token.strip_prefix('-').unwrap_or(token);
+    match digits.as_bytes() {
+        [b'0'] => true,
+        [first, rest @ ..] if *first != b'0' && first.is_ascii_digit() => {
+            rest.iter().all(u8::is_ascii_digit)
+        }
+        _ => false,
+    }
+}
+
 #[test]
 fn lexical_number_token_vector_matches_schema_and_rust_ingest() {
     let vector_path = concat!(
@@ -507,6 +523,10 @@ fn lexical_number_token_vector_matches_schema_and_rust_ingest() {
         let name = case["name"].as_str().expect("case name");
         let field = case["field"].as_str().expect("field");
         let integer_token = case["integer_token"].as_str().expect("integer token");
+        assert!(
+            is_canonical_integer_token(integer_token),
+            "{name}: the baseline token {integer_token} must itself match the frozen rule"
+        );
         let marker = format!("\"{field}\":{integer_token}");
         assert_eq!(
             valid_raw.matches(&marker).count(),
@@ -514,6 +534,10 @@ fn lexical_number_token_vector_matches_schema_and_rust_ingest() {
             "{name}: baseline marker must occur exactly once"
         );
 
+        // Layer 1: well-formed JSON numbers with a non-integer spelling. These
+        // do reach a generic `Value`, and JSON Schema's mathematical
+        // `type: integer` semantics accept them -- which is precisely why the
+        // lexical rule has to exist above the schema.
         for invalid_token in case["rejected_tokens"]
             .as_array()
             .expect("rejected_tokens array")
@@ -522,6 +546,10 @@ fn lexical_number_token_vector_matches_schema_and_rust_ingest() {
             assert!(
                 invalid_token.contains(['.', 'e', 'E']),
                 "{name}: rejected token must exercise fractional/exponent syntax"
+            );
+            assert!(
+                !is_canonical_integer_token(invalid_token),
+                "{name}: rejected token {invalid_token} must not match the frozen rule"
             );
             let replacement = format!("\"{field}\":{invalid_token}");
             let mutated = valid_raw.replacen(&marker, &replacement, 1);
@@ -536,6 +564,38 @@ fn lexical_number_token_vector_matches_schema_and_rust_ingest() {
             assert!(
                 serde_json::from_str::<RecallEnvelopeV2>(&mutated).is_err(),
                 "{name}: Rust ingest must reject floating-point token {invalid_token}"
+            );
+        }
+
+        // Layer 2: a leading `+`, or a leading zero followed by another digit.
+        // RFC 8259 does not admit either, so the document dies in the tokenizer
+        // and there is no `Value` to hand the schema validator at all. That is
+        // why these are a separate layer rather than more `rejected_tokens`.
+        for malformed_token in case["rejected_malformed_tokens"]
+            .as_array()
+            .expect("rejected_malformed_tokens array")
+        {
+            let malformed_token = malformed_token.as_str().expect("raw token string");
+            assert!(
+                !malformed_token.contains(['.', 'e', 'E']),
+                "{name}: malformed token {malformed_token} must exercise lexical syntax rather \
+                 than fractional/exponent form"
+            );
+            assert!(
+                !is_canonical_integer_token(malformed_token),
+                "{name}: malformed token {malformed_token} must not match the frozen rule"
+            );
+            let replacement = format!("\"{field}\":{malformed_token}");
+            let mutated = valid_raw.replacen(&marker, &replacement, 1);
+
+            assert!(
+                serde_json::from_str::<Value>(&mutated).is_err(),
+                "{name}: token {malformed_token} must be rejected as malformed JSON before any \
+                 schema or type-driven check runs"
+            );
+            assert!(
+                serde_json::from_str::<RecallEnvelopeV2>(&mutated).is_err(),
+                "{name}: Rust ingest must reject malformed token {malformed_token}"
             );
         }
     }
@@ -674,6 +734,45 @@ fn schema_rejects_101_hits() {
         .collect();
     value["payload"]["hits"] = Value::Array(hits);
     assert!(!schema_accepts(&value), "101 hits must exceed maxItems");
+}
+
+/// §1.4.1: outside `signed_payload_digest`, `public_recomputable` records
+/// whether that digest's preimage actually travels in the public evidence
+/// package. Both values are therefore valid on the wire and a verifier MUST NOT
+/// reject either — only `signed_payload_digest` is pinned to `true`.
+#[test]
+fn non_signed_payload_digests_accept_both_public_recomputable_values() {
+    for flag in [true, false] {
+        let mut payload = base_payload();
+        payload.query_digest = RecallDigestV2::sha256(b"what did we decide about retries?", flag);
+        payload.retrieval_policy_digest = RecallDigestV2::sha256(b"retrieval-policy-v1", flag);
+        payload.embedding_config_digest = RecallDigestV2::sha256(b"embedding-config-v1", flag);
+        payload.hits[0].content_digest = RecallDigestV2::sha256(b"first memory content", flag);
+        payload.hits[0].provenance_digest =
+            Nullable::some(RecallDigestV2::sha256(b"provenance-v1", flag));
+
+        payload
+            .validate()
+            .unwrap_or_else(|error| panic!("public_recomputable={flag} must validate: {error}"));
+
+        // Round-trip so the flag is proven to travel on the wire rather than
+        // being quietly defaulted back to `true` on the way in.
+        let raw = serde_json::to_string(&envelope(payload)).expect("serialize");
+        let parsed: RecallEnvelopeV2 = serde_json::from_str(&raw).expect("round trip");
+        parsed
+            .validate()
+            .unwrap_or_else(|error| panic!("round-tripped envelope must validate: {error}"));
+
+        assert_eq!(parsed.payload.query_digest.public_recomputable(), flag);
+        assert_eq!(
+            parsed.payload.hits[0].content_digest.public_recomputable(),
+            flag
+        );
+        assert!(
+            parsed.signature.signed_payload_digest.public_recomputable(),
+            "signed_payload_digest stays pinned to true regardless of the other digests"
+        );
+    }
 }
 
 #[test]
@@ -1050,7 +1149,7 @@ fn envelope_fixture_digest_matches_sha256_of_signing_bytes() {
 
 /// The one place this crate touches a public key: proving the checked-in
 /// signature actually verifies. This is vector validation, not a runtime
-/// verification path -- S0.3 owns that.
+/// verification path -- S0.1c owns that.
 #[test]
 fn envelope_fixture_signature_verifies_with_the_checked_in_public_key() {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -1185,8 +1284,10 @@ fn artifact_manifest_detects_a_modified_file() {
 /// insertion-ordered `IndexMap`.
 ///
 /// The canonicaliser sorts keys explicitly rather than inheriting `Map` order,
-/// so these values must hold under either setting. This test pins them; the
-/// companion isolated build with `preserve_order` on runs the same assertions.
+/// so these values must hold under either setting. This test pins them, and the
+/// `aeon_nexus_bridge preserve-order conformance` job in
+/// `.github/workflows/ci.yml` re-runs it with the feature enabled, so both
+/// builds are covered on every pull request and every push to `main`.
 #[test]
 fn canonical_values_are_independent_of_map_ordering() {
     let payload_path = concat!(

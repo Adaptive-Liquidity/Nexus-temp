@@ -69,6 +69,37 @@ This is a closed object: all three members are required, unknown members are
 rejected, and duplicate known members are rejected. `algorithm` accepts only
 the exact lowercase string `sha256`.
 
+#### 1.4.1 `public_recomputable`
+
+`public_recomputable` is `true` **only** when a verifier possessing the public
+evidence package holds both the exact preimage bytes and the frozen derivation
+procedure needed to recompute `value` and compare it. If either is missing it
+MUST be `false`.
+
+It is a statement about reproducibility from public inputs, and nothing else.
+It is specifically **not**:
+
+- an authority label, or any claim about how trustworthy the digest is;
+- a permission, capability, or access-control decision;
+- an instruction to disclose, publish, or withhold the preimage;
+- a correctness guarantee — a digest marked `true` can still be wrong, and
+  recomputation by the verifier is precisely what catches that;
+- a claim that any external resource holding the preimage is, or will remain,
+  available.
+
+`signature.signed_payload_digest.public_recomputable` is fixed at `true` and a
+different value MUST fail closed (§7). Its preimage is `signing_bytes`, derived
+entirely from the transmitted payload and the frozen domain constant, so every
+verifier can always recompute it.
+
+Every other digest location — `query_digest`, `retrieval_policy_digest`,
+`embedding_config_digest`, `hits[].content_digest`, `hits[].provenance_digest` —
+MAY be `true` or `false`. The producer MUST set each one according to whether
+that digest's actual preimage travels in the public evidence package: a recall
+that digests raw query text which is never transmitted sets `false`; one that
+digests a published retrieval policy sets `true`. Both are valid wire values and
+a verifier MUST NOT reject either.
+
 ### 1.5 Signature
 
 | Field | Type | Notes |
@@ -293,6 +324,7 @@ MUST NOT accept an `algorithm` other than `ed25519`.
 | identifiers | required ids non-empty; a present optional id must be non-empty |
 | digests | `algorithm = "sha256"`, 64 lowercase hex chars |
 | signed payload digest | `public_recomputable = true` |
+| other digests | `public_recomputable` set per §1.4.1; both values are valid |
 | unknown fields | rejected |
 | numbers | raw token matches `-?(0|[1-9][0-9]*)`; schema validation alone is insufficient |
 
